@@ -1,0 +1,85 @@
+name: Transcribe
+
+on:
+  workflow_dispatch:
+    inputs:
+      source:
+        description: "Nom du fichier dans la Release 'videos' OU lien direct (http...)"
+        required: true
+      translate:
+        description: "Traduire la transcription en (non = pas de traduction)"
+        type: choice
+        options: [non, fr, it, en, ar]
+        default: non
+      model:
+        description: "Modèle Whisper (auto = choisi selon la durée)"
+        type: choice
+        options: [auto, small, medium, large-v3]
+        default: auto
+
+permissions:
+  contents: write
+
+jobs:
+  transcribe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Installer la transcription
+        run: pip install -r requirements.txt
+
+      - name: Installer la traduction (si demandée)
+        if: inputs.translate != 'non'
+        run: pip install argostranslate --extra-index-url https://download.pytorch.org/whl/cpu
+
+      - name: Cache des modèles
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/huggingface
+            ~/.local/share/argos-translate
+            ~/.local/cache/argos-translate
+          key: modeles-v1-${{ github.run_id }}
+          restore-keys: modeles-v1-
+
+      - name: Récupérer la vidéo
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SRC: ${{ inputs.source }}
+        run: |
+          mkdir -p in
+          if [[ "$SRC" == http* ]]; then
+            name=$(basename "${SRC%%\?*}")
+            curl -L --fail -o "in/${name:-video}" "$SRC"
+          else
+            gh release download videos -p "$SRC" -D in
+          fi
+          ls -lh in
+
+      - name: Transcrire
+        env:
+          MODEL: ${{ inputs.model }}
+          TRAD: ${{ inputs.translate }}
+        run: |
+          f=$(find in -type f | head -n1)
+          python transcribe.py "$f" --model "$MODEL" --translate "$TRAD" --out out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: transcription
+          path: out/
+
+      - name: Publier dans la Release 'transcriptions'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view transcriptions >/dev/null 2>&1 || \
+            gh release create transcriptions -t "Transcriptions" -n "Fichiers .txt et .srt"
+          gh release upload transcriptions out/* --clobber
