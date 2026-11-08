@@ -4,8 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       source:
-        description: "Nom du fichier dans la Release 'videos' OU lien direct (http...)"
-        required: true
+        description: "Lien (YouTube, Drive, direct…) OU nom du fichier dans la Release 'videos'. Vide = dernière vidéo déposée"
+        required: false
+        default: ""
       translate:
         description: "Traduire la transcription en (non = pas de traduction)"
         type: choice
@@ -20,10 +21,16 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: transcribe-${{ github.run_id }}
+
 jobs:
   transcribe:
     runs-on: ubuntu-latest
     timeout-minutes: 350
+    env:
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+      HF_HUB_DISABLE_PROGRESS_BARS: "1"
     steps:
       - uses: actions/checkout@v4
 
@@ -32,12 +39,29 @@ jobs:
           python-version: "3.11"
           cache: pip
 
-      - name: Installer la transcription
-        run: pip install -r requirements.txt
+      - name: Installer ffmpeg
+        run: |
+          if ! command -v ffmpeg >/dev/null; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq ffmpeg >/dev/null
+          fi
+          ffmpeg -version | head -n1
+
+      - name: Installer la transcription et le téléchargement
+        run: |
+          pip install -q -r requirements.txt
+          pip install -q -U "yt-dlp[default]"
+
+      - name: Installer Deno (requis par yt-dlp pour YouTube)
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
 
       - name: Installer la traduction (si demandée)
         if: inputs.translate != 'non'
-        run: pip install argostranslate --extra-index-url https://download.pytorch.org/whl/cpu
+        run: |
+          pip install -q torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -q argostranslate
 
       - name: Cache des modèles
         uses: actions/cache@v4
@@ -46,40 +70,51 @@ jobs:
             ~/.cache/huggingface
             ~/.local/share/argos-translate
             ~/.local/cache/argos-translate
-          key: modeles-v1-${{ github.run_id }}
-          restore-keys: modeles-v1-
+            ~/stanza_resources
+          key: modeles-v2-${{ github.run_id }}
+          restore-keys: modeles-v2-
 
       - name: Récupérer la vidéo
         env:
           GH_TOKEN: ${{ github.token }}
           SRC: ${{ inputs.source }}
+          YT_COOKIES: ${{ secrets.YT_COOKIES }}
         run: |
-          mkdir -p in
-          if [[ "$SRC" == http* ]]; then
-            name=$(basename "${SRC%%\?*}")
-            curl -L --fail -o "in/${name:-video}" "$SRC"
-          else
-            gh release download videos -p "$SRC" -D in
-          fi
-          ls -lh in
+          if [ -n "$YT_COOKIES" ]; then printf '%s\n' "$YT_COOKIES" > cookies.txt; fi
+          bash fetch.sh "$SRC"
+          rm -f cookies.txt
 
       - name: Transcrire
         env:
           MODEL: ${{ inputs.model }}
           TRAD: ${{ inputs.translate }}
-        run: |
-          f=$(find in -type f | head -n1)
-          python transcribe.py "$f" --model "$MODEL" --translate "$TRAD" --out out
+        run: python transcribe.py "$FICHIER" --model "$MODEL" --translate "$TRAD" --out out
 
-      - uses: actions/upload-artifact@v4
+      # Les étapes suivantes tournent même en cas d'échec ou de coupure,
+      # pour récupérer la transcription partielle.
+      - name: Artefact
+        if: always() && hashFiles('out/*.txt') != ''
+        uses: actions/upload-artifact@v4
         with:
           name: transcription
-          path: out/
+          path: out/*.*
 
       - name: Publier dans la Release 'transcriptions'
+        if: always() && hashFiles('out/*.txt') != ''
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release view transcriptions >/dev/null 2>&1 || \
             gh release create transcriptions -t "Transcriptions" -n "Fichiers .txt et .srt"
-          gh release upload transcriptions out/* --clobber
+          gh release upload transcriptions out/*.txt out/*.srt --clobber
+          {
+            echo "## Transcription"
+            echo "Fichiers dans la Release **transcriptions** :"
+            for f in out/*.txt out/*.srt; do echo "- $(basename "$f")"; done
+            echo
+            echo "### Début du texte"
+            echo '```'
+            head -c 1500 "$(ls out/*.txt | head -n1)"
+            echo
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
