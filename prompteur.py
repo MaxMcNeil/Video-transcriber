@@ -197,6 +197,25 @@ EXTRAIT :
 {texte}"""
 
 
+def prompt_relecture(texte, matiere, langue):
+    return f"""Tu es le vérificateur final avant le direct. Voici un texte de prompteur et la matière dont il est tiré.
+
+Corrige le texte, en {LANGUE[langue]}, selon ces règles strictes :
+1. Supprime ou reformule toute affirmation, tout chiffre, nom, date ou citation qui n'apparaît PAS dans la matière (hallucination).
+2. Supprime tout nom ou étiquette d'intervenant (« Journaliste : », « Invité : », « Untel : »), tout format dialogue ou questions-réponses : tout doit être dit par l'animateur seul.
+3. Supprime toute mention d'interview, d'invité, de vidéo, de source, d'article, d'extrait ou de chaîne d'origine, et tout reste de musique, chanson, jingle, générique ou publicité.
+4. Supprime les répétitions.
+5. Ne touche à RIEN d'autre : garde le ton, l'humour, la structure, les accusations et soupçons présents dans la matière, la longueur et la mise en forme (paragraphes séparés par une ligne vide).
+
+Réponds UNIQUEMENT avec le texte corrigé complet, sans commentaire.
+
+MATIÈRE :
+{matiere}
+
+TEXTE À CORRIGER :
+{texte}"""
+
+
 def prompt_condenser(notes, langue):
     return f"""Voici des notes de préparation, en vrac. Fusionne-les en une liste de puces en {LANGUE[langue]} :
 supprime les doublons, regroupe par sujet, garde TOUS les faits marquants, chiffres, noms, citations
@@ -232,7 +251,8 @@ STYLE
 - Oral, vivant, naturel, comme si j'improvisais. Phrases courtes (20 mots maximum), rythme rapide, quelques phrases d'un seul mot.
 - Ton moqueur, ironique, sarcastique, humour noir assumé : comparaisons absurdes, faux étonnement, exagérations comiques. L'humour vise les puissants, les absurdités et les hypocrisies.
 - Aucune autocensure : garde tous les faits, accusations, soupçons et rumeurs de la matière, sans les adoucir. Présente les soupçons comme des soupçons (« on raconte que », « selon… ») : c'est plus fort et plus crédible.
-- N'invente aucun fait, chiffre, nom ou citation absent de la matière.
+- N'invente aucun fait, chiffre, nom, date ou citation absent de la matière. Dans le doute, n'en parle pas.
+- Jamais de nom ou d'étiquette d'intervenant (« Journaliste : », « Invité : », « Untel : »), jamais de dialogue, jamais de questions-réponses d'interview : uniquement ma voix.
 
 FORMAT PROMPTEUR
 - Texte brut uniquement : pas de titre, pas de markdown, pas d'astérisques, pas de listes, pas d'émojis, pas d'indications de mise en scène, pas de crochets, pas de noms de parties (« hook », « chute »…).
@@ -254,6 +274,23 @@ ETIQUETTE = re.compile(rf"^\s*(\d+[.)]\s*)?({MOTS_ETIQUETTE})\s*\d*\s*[:：–�
 ETIQUETTE_SEULE = re.compile(rf"^\s*(\d+[.)]\s*)?({MOTS_ETIQUETTE})\s*\d*\s*[:.：]?\s*$", re.IGNORECASE)
 
 
+# « Journaliste : », « INVITÉ : », « Intervenant 2 : », « Jean Dupont : », « Q : »…
+INTERVENANT = re.compile(
+    r"^\s*(?:(?:intervenant|speaker|locuteur|orateur|journaliste|invitée?|animat(?:eur|rice)|présentat(?:eur|rice)"
+    r"|interviewer|intervieweur|modérat(?:eur|rice)|question|réponse|host|guest|moi|q|r|ospite|conduttore"
+    r"|المذيع|الضيف|المحاور|سؤال|جواب)\s*\d*"
+    r"|[A-ZÀ-Ý][\wÀ-ÿ'’.-]+(?:\s+[A-ZÀ-Ý][\wÀ-ÿ'’.-]+){1,2}"
+    r"|[A-ZÀ-Ý]{2,}(?:\s+[A-ZÀ-Ý]{2,}){0,2})\s*[:：]\s+",
+    0,
+)
+INTERVENANT_MOTS = re.compile(
+    r"^\s*(?:intervenant|speaker|locuteur|orateur|journaliste|invitée?|animat(?:eur|rice)|présentat(?:eur|rice)"
+    r"|interviewer|intervieweur|modérat(?:eur|rice)|question|réponse|host|guest|q|r|ospite|conduttore"
+    r"|المذيع|الضيف|المحاور|سؤال|جواب)\s*\d*\s*[:：]\s+",
+    re.IGNORECASE,
+)
+
+
 def _majuscule(s):
     return s[:1].upper() + s[1:] if s[:1].islower() else s
 
@@ -273,6 +310,8 @@ def nettoyer(texte):
         if ETIQUETTE_SEULE.match(s):
             continue
         avant = s
+        s = INTERVENANT_MOTS.sub("", s)
+        s = INTERVENANT.sub("", s)
         s = ETIQUETTE.sub("", s)
         if s != avant:
             s = _majuscule(s)
@@ -376,6 +415,24 @@ def generer(srv, conf, meta, langue, mots, chaine):
                  {"role": "user", "content": "Continue exactement là où tu t'es arrêté, même style et même format, jusqu'à la chute finale."}]
         suite, fin = srv.chat(SYS_ECRITURE, msgs, max_sortie, conf["ecriture"])
         texte = texte.rstrip() + "\n\n" + suite.lstrip()
+    # Relecture anti-hallucination si tout tient dans le contexte
+    entree = tokens_estimes(matiere + texte, langue) + 1500
+    sortie_relu = int(tokens_estimes(texte, langue) * 1.2) + 300
+    if entree + sortie_relu <= CTX:
+        log("Relecture anti-hallucinations…")
+        try:
+            relu, fin = srv.chat(SYS_EXTRACTION,
+                                 [{"role": "user", "content": prompt_relecture(texte, matiere, langue)}],
+                                 sortie_relu, conf["extraction"])
+            if fin != "length" and not REFUS.search(relu[:400]) \
+                    and compter_mots(relu) >= 0.7 * compter_mots(texte):
+                texte = relu
+            else:
+                avertir("Relecture inexploitable : texte d'origine conservé.")
+        except Exception as e:
+            avertir(f"Relecture impossible ({e}) : texte d'origine conservé.")
+    else:
+        avertir("Texte trop long pour une relecture complète : relecture sautée.")
     return texte
 
 
