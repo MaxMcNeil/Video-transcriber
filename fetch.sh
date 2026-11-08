@@ -6,7 +6,8 @@
 #   - autre lien      : YouTube, Drive, X, Facebook… via yt-dlp (audio seul)
 set -uo pipefail
 SRC="${1:-}"
-SRC="$(echo "$SRC" | xargs)"   # enlève les espaces parasites
+SRC="${SRC#"${SRC%%[![:space:]]*}"}"   # enlève les espaces parasites
+SRC="${SRC%"${SRC##*[![:space:]]}"}"
 mkdir -p in
 REPO="${GITHUB_REPOSITORY:?}"
 

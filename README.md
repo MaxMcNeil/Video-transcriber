@@ -23,8 +23,14 @@ Résultats dans la Release **transcriptions** (et en artefact du run) ; un aper�
 - Les modèles sont téléchargés au premier lancement puis mis en cache.
 
 ## YouTube bloqué ?
-YouTube refuse parfois les serveurs GitHub (« confirm you're not a bot »). Deux solutions :
-1. Dépose la vidéo dans la Release **videos** et relance (champ `source` vide).
-2. Ajoute tes cookies YouTube : exporte-les au format Netscape (extension « Get cookies.txt LOCALLY »), puis Settings → Secrets and variables → Actions → New secret `YT_COOKIES` en collant le contenu du fichier. Utilise de préférence un compte Google secondaire.
+YouTube refuse souvent les serveurs GitHub (« confirm you're not a bot »). Solutions, de la plus fiable à la moins fiable :
+1. **Depuis le téléphone (recommandé)**, dans Termux :
+   ```bash
+   curl -fsSLO https://raw.githubusercontent.com/MaxMcNeil/Video-transcriber/main/yt2release.sh
+   bash yt2release.sh "LIEN_YOUTUBE" non     # ou fr / it / en / ar pour traduire
+   ```
+   Le téléphone télécharge l'audio seul (léger), le dépose dans la Release **videos** et lance la transcription.
+2. Dépose toi-même la vidéo dans la Release **videos** et lance avec `source` vide.
+3. Ajoute tes cookies YouTube : exporte-les au format Netscape (extension « Get cookies.txt LOCALLY »), puis Settings → Secrets and variables → Actions → New secret `YT_COOKIES` en collant le contenu du fichier. Utilise de préférence un compte Google secondaire.
 
 Déclenchement manuel uniquement, aucun cron.
