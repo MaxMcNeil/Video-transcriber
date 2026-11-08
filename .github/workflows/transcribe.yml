@@ -4,25 +4,37 @@ on:
   workflow_dispatch:
     inputs:
       source:
-        description: "Lien (YouTube, Drive, direct…) OU nom du fichier dans la Release 'videos'. Vide = dernière vidéo déposée"
+        description: "Liens et/ou noms de fichiers de la Release 'videos', séparés par ; — vide = dernière vidéo — tout = toute la Release"
         required: false
         default: ""
+      prompteur:
+        description: "Texte prompteur face caméra : langue (auto = langue des sources) ou non"
+        type: choice
+        options: [auto, fr, ar, it, en, non]
+        default: auto
+      duree_prompteur:
+        description: "Longueur du texte prompteur (auto ≈ selon la matière ; court ≈ 3 min, moyen ≈ 7 min, long ≈ 13 min)"
+        type: choice
+        options: [auto, court, moyen, long]
+        default: auto
+      ia:
+        description: "IA locale qui écrit le prompteur (l'autre sert de secours)"
+        type: choice
+        options: [qwen3-8b, mistral-nemo-12b]
+        default: qwen3-8b
       translate:
-        description: "Traduire la transcription en (non = pas de traduction)"
+        description: "Traduire aussi la transcription complète en (non = pas de traduction)"
         type: choice
         options: [non, fr, it, en, ar]
         default: non
       model:
-        description: "Modèle Whisper (auto = choisi selon la durée)"
+        description: "Modèle de transcription (auto = le plus précis possible selon la durée)"
         type: choice
-        options: [auto, small, medium, large-v3]
+        options: [auto, small, large-v3-turbo, large-v3]
         default: auto
 
 permissions:
   contents: write
-
-concurrency:
-  group: transcribe-${{ github.run_id }}
 
 jobs:
   transcribe:
@@ -31,7 +43,15 @@ jobs:
     env:
       PIP_DISABLE_PIP_VERSION_CHECK: "1"
       HF_HUB_DISABLE_PROGRESS_BARS: "1"
+      PYTHONUNBUFFERED: "1"
     steps:
+      - name: Préparer
+        run: |
+          echo "JOB_START=$(date +%s)" >> "$GITHUB_ENV"
+          # libère ~20 Go (modèles IA volumineux)
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL &
+          df -h / | tail -n1
+
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
@@ -47,7 +67,7 @@ jobs:
           fi
           ffmpeg -version | head -n1
 
-      - name: Installer la transcription et le téléchargement
+      - name: Installer transcription et téléchargement
         run: |
           pip install -q -r requirements.txt
           pip install -q -U "yt-dlp[default]"
@@ -63,18 +83,7 @@ jobs:
           pip install -q torch --index-url https://download.pytorch.org/whl/cpu
           pip install -q argostranslate
 
-      - name: Cache des modèles
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cache/huggingface
-            ~/.local/share/argos-translate
-            ~/.local/cache/argos-translate
-            ~/stanza_resources
-          key: modeles-v2-${{ github.run_id }}
-          restore-keys: modeles-v2-
-
-      - name: Récupérer la vidéo
+      - name: Récupérer les sources
         env:
           GH_TOKEN: ${{ github.token }}
           SRC: ${{ inputs.source }}
@@ -84,20 +93,47 @@ jobs:
           bash fetch.sh "$SRC"
           rm -f cookies.txt
 
-      - name: Transcrire
+      - name: Choisir le modèle de transcription
+        id: choix
         env:
           MODEL: ${{ inputs.model }}
+        run: echo "modele=$(python transcribe.py --model "$MODEL" --choisir)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache du modèle de transcription
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface/hub/models--*whisper*
+          key: whisper-v1-${{ steps.choix.outputs.modele }}
+
+      - name: Transcrire
+        env:
+          MODEL: ${{ steps.choix.outputs.modele }}
           TRAD: ${{ inputs.translate }}
-        run: python transcribe.py "$FICHIER" --model "$MODEL" --translate "$TRAD" --out out
+        run: python transcribe.py --model "$MODEL" --translate "$TRAD"
+
+      - name: Installer le moteur IA local
+        if: inputs.prompteur != 'non'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash install_llm.sh
+
+      - name: Écrire le texte prompteur
+        if: inputs.prompteur != 'non'
+        timeout-minutes: 170
+        env:
+          LANGUE: ${{ inputs.prompteur }}
+          DUREE: ${{ inputs.duree_prompteur }}
+          IA: ${{ inputs.ia }}
+        run: python prompteur.py --langue "$LANGUE" --duree "$DUREE" --ia "$IA"
 
       # Les étapes suivantes tournent même en cas d'échec ou de coupure,
-      # pour récupérer la transcription partielle.
+      # pour toujours récupérer ce qui a été produit.
       - name: Artefact
         if: always() && hashFiles('out/*.txt') != ''
         uses: actions/upload-artifact@v4
         with:
           name: transcription
-          path: out/*.*
+          path: out/
 
       - name: Publier dans la Release 'transcriptions'
         if: always() && hashFiles('out/*.txt') != ''
@@ -105,16 +141,22 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release view transcriptions >/dev/null 2>&1 || \
-            gh release create transcriptions -t "Transcriptions" -n "Fichiers .txt et .srt"
+            gh release create transcriptions -t "Transcriptions" -n "Transcriptions et textes prompteur"
+          shopt -s nullglob
           gh release upload transcriptions out/*.txt out/*.srt --clobber
           {
-            echo "## Transcription"
-            echo "Fichiers dans la Release **transcriptions** :"
-            for f in out/*.txt out/*.srt; do echo "- $(basename "$f")"; done
-            echo
-            echo "### Début du texte"
-            echo '```'
-            head -c 1500 "$(ls out/*.txt | head -n1)"
-            echo
-            echo '```'
+            echo "## Résultats (Release **transcriptions**)"
+            for f in out/*.txt out/*.srt; do echo "- \`$(basename "$f")\`"; done
+            if [ -s in/echecs.txt ]; then
+              echo; echo "### ⚠️ Sources non récupérées"
+              sed 's/^/- /' in/echecs.txt
+            fi
+            p=$(ls out/*_prompteur.txt 2>/dev/null | head -n1)
+            if [ -n "$p" ]; then
+              echo; echo "### Début du texte prompteur"; echo '```'; head -c 1800 "$p"; echo; echo '```'
+            fi
+            t=$(ls out/*_transcription.txt 2>/dev/null | head -n1)
+            if [ -n "$t" ]; then
+              echo; echo "### Début de la transcription"; echo '```'; head -c 1000 "$t"; echo; echo '```'
+            fi
           } >> "$GITHUB_STEP_SUMMARY"

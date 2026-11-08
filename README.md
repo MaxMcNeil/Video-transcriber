@@ -1,36 +1,54 @@
 # Video-transcriber
 
-Transcription 100 % locale d'une vidéo ou d'un audio (2 min à 2 h et plus) en `.txt` et `.srt`, via Whisper (faster-whisper) exécuté sur le runner GitHub. Aucune API, aucun service payant.
+Transcription 100 % locale d'une ou plusieurs vidéos/audios (2 min à plusieurs heures), puis **texte prompteur prêt à lire face caméra** écrit par une IA locale. Aucune API, aucun service payant : tout tourne sur le runner GitHub.
 
 ## Utilisation
 Actions → **Transcribe** → Run workflow :
-- `source` :
-  - **vide** = la dernière vidéo déposée dans la Release **videos**
-  - un **nom de fichier** de la Release **videos** (espaces et majuscules tolérés)
-  - un **lien** : YouTube, Google Drive, X, Facebook, Telegram… ou lien direct `.mp4/.mp3`
-- `translate` : `non` (par défaut), ou `fr`, `it`, `en`, `ar`
-- `model` : laisse `auto`
 
-Résultats dans la Release **transcriptions** (et en artefact du run) ; un aperçu du texte s'affiche dans le résumé du run :
-- `nom.txt` / `nom.srt` : transcription dans la langue d'origine
-- `nom.<langue>.txt` / `.srt` : traduction, si demandée
+| Champ | Valeurs |
+|---|---|
+| `source` | vide = dernière vidéo de la Release **videos** · `tout` = toute la Release · ou une liste séparée par `;` de liens (YouTube, Drive, X, Telegram, lien direct…) et/ou de noms de fichiers de la Release |
+| `prompteur` | `auto` (langue des sources) · `fr` · `ar` · `it` · `en` · `non` |
+| `duree_prompteur` | `auto` · `court` (~3 min) · `moyen` (~7 min) · `long` (~13 min) |
+| `ia` | `qwen3-8b` (défaut) · `mistral-nemo-12b` — l'autre sert de secours automatique |
+| `translate` | traduction de la transcription complète : `non` · `fr` · `it` · `en` · `ar` |
+| `model` | laisse `auto` |
 
-## Fonctionnement
-- **Langue** : détectée sur 8 extraits de parole, limitée à fr, it, en, ar.
-- **Modèle auto** : `large-v3` jusqu'à 15 min, `medium` jusqu'à 75 min, `small` au-delà (limite de 6 h de GitHub).
-- **Sûreté** : texte écrit au fil de l'eau et publié même si le job échoue ou est coupé ; filtre anti-boucle (hallucinations) ; messages d'erreur clairs.
-- **Traduction** : Argos Translate en local (passe par l'anglais si besoin). Si elle échoue, la transcription est quand même publiée.
-- Les modèles sont téléchargés au premier lancement puis mis en cache.
+Exemple de `source` : `https://youtu.be/xxx ; interview.mp4 ; https://x.com/.../status/123`
+
+## Résultats (Release **transcriptions**, préfixe date + titre)
+- `…_transcription.txt` : **toutes les sources dans un seul fichier**, paragraphes horodatés
+- `…_prompteur.txt` : **le texte à coller dans le prompteur**
+- `…_transcription.<langue>.txt` : traduction, si demandée
+- `…_sous-titres_NN.srt` : sous-titres de chaque source
+
+Le résumé du run affiche le début du prompteur et de la transcription.
+
+## Le texte prompteur
+- Les sources sont fusionnées en **une seule histoire fluide**, regroupée par idées.
+- Interviews et débats deviennent **ton propre propos**, comme si tu parlais en live.
+- Musique, chansons, jingles, intros/outros, pubs, présentations d'invités : ignorés.
+- Structure rétention : **hook choc** → promesse → blocs avec relances → appel à liker → chute + abonnement.
+- Ton moqueur, humour noir, phrases courtes, aucune autocensure ; aucun fait inventé.
+- Texte brut : pas de titres, pas de markdown, un paragraphe par idée.
+- Nom de la chaîne cité dans l'appel à l'abonnement selon la langue : modifiable dans `config.json`.
+
+## Fiabilité
+- Une source qui échoue n'arrête pas les autres ; la liste des échecs apparaît dans le résumé.
+- Transcription écrite au fil de l'eau et **publiée même si une étape suivante échoue** ou si le job est coupé.
+- Filtres anti-hallucinations Whisper (« Amara.org », « ♪ », boucles).
+- IA : si l'une refuse ou échoue, bascule automatique sur l'autre. Moteur llama.cpp officiel, avec compilation de secours.
+- Modèle de transcription adapté à la durée totale : `large-v3` ≤ 40 min, `large-v3-turbo` ≤ 2 h 30, `small` au-delà.
 
 ## YouTube bloqué ?
-YouTube refuse souvent les serveurs GitHub (« confirm you're not a bot »). Solutions, de la plus fiable à la moins fiable :
+YouTube refuse souvent les serveurs GitHub (« confirm you're not a bot »). Solutions :
 1. **Depuis le téléphone (recommandé)**, dans Termux :
    ```bash
    curl -fsSLO https://raw.githubusercontent.com/MaxMcNeil/Video-transcriber/main/yt2release.sh
-   bash yt2release.sh "LIEN_YOUTUBE" non     # ou fr / it / en / ar pour traduire
+   bash yt2release.sh "LIEN_YOUTUBE"
    ```
-   Le téléphone télécharge l'audio seul (léger), le dépose dans la Release **videos** et lance la transcription.
+   Le téléphone télécharge l'audio seul, le dépose dans la Release **videos** et lance le workflow.
 2. Dépose toi-même la vidéo dans la Release **videos** et lance avec `source` vide.
-3. Ajoute tes cookies YouTube : exporte-les au format Netscape (extension « Get cookies.txt LOCALLY »), puis Settings → Secrets and variables → Actions → New secret `YT_COOKIES` en collant le contenu du fichier. Utilise de préférence un compte Google secondaire.
+3. Ajoute tes cookies YouTube : exporte-les au format Netscape (extension « Get cookies.txt LOCALLY »), puis Settings → Secrets and variables → Actions → secret `YT_COOKIES`. Utilise de préférence un compte Google secondaire.
 
 Déclenchement manuel uniquement, aucun cron.

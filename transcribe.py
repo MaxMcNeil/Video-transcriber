@@ -1,217 +1,312 @@
 #!/usr/bin/env python3
-"""Transcription 100 % locale d'une vidéo ou d'un audio (Whisper via faster-whisper).
+"""Transcription 100 % locale d'une ou plusieurs sources (Whisper via faster-whisper).
 
-- Langue détectée automatiquement parmi fr / it / en / ar
-- Modèle choisi automatiquement selon la durée (ou imposé)
-- Écriture au fil de l'eau : rien n'est perdu si le job est coupé
-- Traduction optionnelle, locale (Argos Translate), vers fr / it / en / ar
+Entrée : in/sources.tsv (chemin<TAB>titre), dans l'ordre voulu.
+Sorties (préfixe P = date + titre) :
+  out/P_transcription.txt          toutes les sources dans UN fichier, paragraphes horodatés
+  out/P_transcription.<lg>.txt     traduction (optionnelle, locale, Argos Translate)
+  out/P_sous-titres_NN.srt         sous-titres de chaque source
+  work/meta.json                   données pour prompteur.py
 """
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import time
+import unicodedata
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 LANGS = ("fr", "it", "en", "ar")
+NOMS = {"fr": "français", "it": "italien", "en": "anglais", "ar": "arabe"}
+DEBUT_JOB = float(os.environ.get("JOB_START", time.time()))
+LIMITE_JOB_MIN = 300  # arrêt propre bien avant les 6 h de GitHub
+
+# Phrases fantômes connues de Whisper (silence, musique, génériques) :
+# appliquées seulement aux segments courts, pour ne jamais couper une vraie phrase.
+HALLU_MARQUE = re.compile(
+    r"amara\.org|sous-titr(es|age) (réalisés |faits )?(par|:)|sous-titrage st|sottotitoli (creati|e revisione)"
+    r"|subtitles by|subtitled by|transcri(bed|ption) by|nancy ?qanqar|نانسي قنقر|ترجمة نانسي",
+    re.IGNORECASE,
+)
+HALLU_SEUL = re.compile(
+    r"^(merci|thank you|thanks|grazie)( beaucoup| so much| mille)?"
+    r"( d'avoir regardé( cette vidéo)?| for watching| per la visione)?[ .!]*$"
+    r"|^[\s♪♫🎵*.,!?…-]*$"
+    r"|^[\[(]?(musique|music|musica|موسيقى|applaudissements|applause|rires|laughs|silence)[\])]?\.?$",
+    re.IGNORECASE,
+)
 
 
-def log(msg: str) -> None:
+def fantome(t):
+    return bool(HALLU_SEUL.match(t)) or (len(t) < 90 and bool(HALLU_MARQUE.search(t)))
+
+
+def log(msg):
     print(msg, flush=True)
 
 
-def erreur(msg: str, code: int = 1) -> None:
-    print(f"::error::{msg}", flush=True)
-    sys.exit(code)
-
-
-def ts(t: float) -> str:
-    h = int(t // 3600)
-    m = int(t % 3600 // 60)
-    s = t % 60
+def ts(t):
+    h, m, s = int(t // 3600), int(t % 3600 // 60), t % 60
     return f"{h:02d}:{m:02d}:{s:06.3f}".replace(".", ",")
 
 
-def sonde(path: str) -> dict:
-    r = subprocess.run(
-        ["ffprobe", "-v", "error", "-show_entries",
-         "format=duration:stream=codec_type", "-of", "json", path],
-        capture_output=True, text=True,
-    )
-    if r.returncode != 0:
-        erreur(f"Fichier illisible par ffmpeg ({os.path.basename(path)}). "
-               f"Ce n'est probablement pas une vidéo : {r.stderr.strip()[:300]}")
-    return json.loads(r.stdout)
+def hhmm(t):
+    h, m, s = int(t // 3600), int(t % 3600 // 60), int(t % 60)
+    return f"{h}:{m:02d}:{s:02d}" if h else f"{m:02d}:{s:02d}"
 
 
-def choisir_modele(sec: float) -> str:
-    """Le plus précis possible en restant loin de la limite de 6 h de GitHub."""
-    minutes = sec / 60
-    if minutes <= 15:
+def duree_txt(sec):
+    m = round(sec / 60)
+    return f"{m // 60} h {m % 60:02d} min" if m >= 60 else f"{max(m, 1)} min"
+
+
+def slug(texte, n=40):
+    t = unicodedata.normalize("NFKD", texte).encode("ascii", "ignore").decode()
+    t = re.sub(r"[^A-Za-z0-9]+", "-", t).strip("-")
+    return (t[:n].rstrip("-") or "video")
+
+
+def duree_fichier(path):
+    r = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration",
+                        "-of", "json", path], capture_output=True, text=True)
+    try:
+        return float(json.loads(r.stdout)["format"]["duration"])
+    except Exception:
+        return 0.0
+
+
+def choisir_modele(total_sec):
+    """Le plus précis possible dans le temps disponible (mesuré : small ≈ 8× temps réel)."""
+    m = total_sec / 60
+    if m <= 40:
         return "large-v3"
-    if minutes <= 75:
-        return "medium"
+    if m <= 150:
+        return "large-v3-turbo"
     return "small"
 
 
-class Sortie:
-    """Écrit .txt et .srt segment par segment (flush immédiat)."""
-
-    def __init__(self, base_path: str):
-        self.base = base_path
-        self.txt = open(base_path + ".txt", "w", encoding="utf-8")
-        self.srt = open(base_path + ".srt", "w", encoding="utf-8")
-        self.n = 0
-
-    def ajouter(self, start: float, end: float, text: str) -> None:
-        self.n += 1
-        self.txt.write(text + "\n")
-        self.srt.write(f"{self.n}\n{ts(start)} --> {ts(end)}\n{text}\n\n")
-        self.txt.flush()
-        self.srt.flush()
-
-    def fermer(self) -> None:
-        self.txt.close()
-        self.srt.close()
-        log(f"Écrit : {self.base}.txt et {self.base}.srt ({self.n} segments)")
+def extraire_audio(src, wav):
+    r = subprocess.run(["ffmpeg", "-y", "-nostdin", "-loglevel", "error", "-i", src, "-vn",
+                        "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", wav],
+                       capture_output=True, text=True)
+    return r.returncode == 0, r.stderr.strip()[:400]
 
 
-def preparer_traduction(src: str, dst: str):
+def paragraphes(segs):
+    """Regroupe les segments en paragraphes lisibles (pause, longueur, fin de phrase)."""
+    out, cur, debut, fin_prec = [], [], 0.0, None
+    for s, e, t in segs:
+        longueur = sum(len(x) for x in cur)
+        coupe = cur and (
+            (fin_prec is not None and s - fin_prec >= 1.8)
+            or (longueur >= 650 and re.search(r"[.!?…؟]$", cur[-1]))
+            or longueur >= 1100
+        )
+        if coupe:
+            out.append((debut, " ".join(cur)))
+            cur = []
+        if not cur:
+            debut = s
+        cur.append(t)
+        fin_prec = e
+    if cur:
+        out.append((debut, " ".join(cur)))
+    return out
+
+
+def preparer_traduction(src, dst):
     import argostranslate.package
     import argostranslate.translate
 
     argostranslate.package.update_package_index()
     dispo = argostranslate.package.get_available_packages()
-    installes = {(p.from_code, p.to_code)
-                 for p in argostranslate.package.get_installed_packages()}
+    installes = {(p.from_code, p.to_code) for p in argostranslate.package.get_installed_packages()}
 
     def installer(f, t):
         if (f, t) in installes:
             return True
         for p in dispo:
             if p.from_code == f and p.to_code == t:
-                log(f"Téléchargement du modèle de traduction {f} -> {t}")
+                log(f"Modèle de traduction {f} -> {t}")
                 argostranslate.package.install_from_path(p.download())
+                installes.add((f, t))
                 return True
         return False
 
-    # Direct si possible, sinon via l'anglais
-    if not installer(src, dst):
-        if not (installer(src, "en") and installer("en", dst)):
-            raise RuntimeError(f"Aucun modèle de traduction {src} -> {dst}")
+    if not installer(src, dst) and not (installer(src, "en") and installer("en", dst)):
+        raise RuntimeError(f"aucun modèle de traduction {src} -> {dst}")
     return argostranslate.translate.get_translation_from_codes(src, dst).translate
 
 
-def main() -> None:
+def main():
     p = argparse.ArgumentParser()
-    p.add_argument("video")
+    p.add_argument("--sources", default="in/sources.tsv")
     p.add_argument("--model", default="auto")
     p.add_argument("--translate", default="non")
     p.add_argument("--out", default="out")
+    p.add_argument("--work", default="work")
+    p.add_argument("--choisir", action="store_true",
+                   help="affiche seulement le modèle qui sera utilisé (pour le cache)")
     a = p.parse_args()
 
-    if not os.path.isfile(a.video) or os.path.getsize(a.video) == 0:
-        erreur(f"Fichier d'entrée absent ou vide : {a.video}")
+    sources = []
+    with open(a.sources, encoding="utf-8") as f:
+        for ligne in f:
+            if "\t" in ligne:
+                chemin, titre = ligne.rstrip("\n").split("\t", 1)
+                sources.append({"path": chemin, "titre": titre.strip() or "source"})
+    if not sources:
+        print("::error::Aucune source à transcrire.")
+        sys.exit(1)
 
-    info_fichier = sonde(a.video)
-    if not any(s.get("codec_type") == "audio" for s in info_fichier.get("streams", [])):
-        erreur("Ce fichier ne contient aucune piste audio : rien à transcrire.")
+    for s in sources:
+        s["duree"] = duree_fichier(s["path"])
+    total = sum(s["duree"] for s in sources)
+    modele = choisir_modele(total) if a.model == "auto" else a.model
+    if a.choisir:
+        print(modele)
+        return
 
     os.makedirs(a.out, exist_ok=True)
-    base = os.path.splitext(os.path.basename(a.video))[0] or "video"
-    wav = os.path.join(a.out, ".audio.wav")
+    os.makedirs(a.work, exist_ok=True)
+    maintenant = datetime.now(ZoneInfo("Europe/Rome"))
+    prefixe = f"{maintenant:%Y-%m-%d_%Hh%M}_{slug(sources[0]['titre'], 35)}"
+    if len(sources) > 1:
+        prefixe += f"_+{len(sources) - 1}"
+    if os.environ.get("GITHUB_ENV"):
+        with open(os.environ["GITHUB_ENV"], "a") as g:
+            g.write(f"PREFIXE={prefixe}\n")
 
-    log("Extraction de l'audio…")
-    r = subprocess.run(
-        ["ffmpeg", "-y", "-nostdin", "-loglevel", "error", "-i", a.video,
-         "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", wav],
-        capture_output=True, text=True,
-    )
-    if r.returncode != 0:
-        erreur(f"Échec de l'extraction audio : {r.stderr.strip()[:500]}")
+    log(f"{len(sources)} source(s) | durée totale {duree_txt(total)} | modèle {modele} | CPU {os.cpu_count()}")
 
     from faster_whisper import WhisperModel, decode_audio
 
-    audio = decode_audio(wav)
-    os.remove(wav)
-    total = len(audio) / 16000
-    if total < 1:
-        erreur("Audio trop court (moins d'une seconde).")
-
-    modele = choisir_modele(total) if a.model == "auto" else a.model
-    log(f"Durée : {total / 60:.1f} min | Modèle : {modele} | CPU : {os.cpu_count()}")
-
     t0 = time.time()
-    model = WhisperModel(modele, device="cpu", compute_type="int8",
-                         cpu_threads=os.cpu_count() or 2)
+    model = WhisperModel(modele, device="cpu", compute_type="int8", cpu_threads=os.cpu_count() or 2)
     log(f"Modèle chargé en {time.time() - t0:.0f} s")
 
-    # Détection sur plusieurs extraits de parole, restreinte à fr / it / en / ar
-    _, _, probas = model.detect_language(
-        audio, vad_filter=True,
-        language_detection_segments=8, language_detection_threshold=0.9,
-    )
-    probas = dict(probas or [])
-    langue = max(LANGS, key=lambda l: probas.get(l, 0.0))
-    brut = max(probas, key=probas.get) if probas else "?"
-    log(f"Langue retenue : {langue} ({probas.get(langue, 0):.0%}) [détection brute : {brut}]")
+    chemin_txt = os.path.join(a.out, f"{prefixe}_transcription.txt")
+    txt = open(chemin_txt, "w", encoding="utf-8")
+    txt.write(f"TRANSCRIPTION — {len(sources)} source(s) — {duree_txt(total)} — "
+              f"{maintenant:%d/%m/%Y %H:%M}\n")
+    txt.flush()
 
-    segments, _ = model.transcribe(
-        audio,
-        language=langue,
-        vad_filter=True,
-        vad_parameters={"min_silence_duration_ms": 500},
-        beam_size=5,
-        condition_on_previous_text=False,   # évite les boucles sur les longues vidéos
-        no_speech_threshold=0.6,
-        compression_ratio_threshold=2.4,
-    )
-
-    sortie = Sortie(os.path.join(a.out, base))
-    segs = []
-    precedent, repetitions = None, 0
-    last = time.time()
-    for seg in segments:
-        text = seg.text.strip()
-        if not text:
+    meta = {"prefixe": prefixe, "modele": modele, "sources": [], "incomplet": False}
+    deja_fait = 0.0
+    for i, s in enumerate(sources, 1):
+        if (time.time() - DEBUT_JOB) / 60 > LIMITE_JOB_MIN:
+            log(f"::warning::Temps limite proche : sources {i} à {len(sources)} non transcrites.")
+            meta["incomplet"] = True
+            break
+        log(f"── Source {i}/{len(sources)} : {s['titre']} ({duree_txt(s['duree'])})")
+        wav = os.path.join(a.work, "audio.wav")
+        ok, err = extraire_audio(s["path"], wav)
+        if not ok:
+            log(f"::warning::Source {i} ignorée, extraction audio impossible : {err}")
             continue
-        # Filtre anti-hallucination : même phrase répétée en boucle
-        repetitions = repetitions + 1 if text == precedent else 0
-        precedent = text
-        if repetitions >= 2:
+        audio = decode_audio(wav)
+        os.remove(wav)
+        dur = len(audio) / 16000
+        if dur < 1:
+            log(f"::warning::Source {i} ignorée : audio vide.")
             continue
-        sortie.ajouter(seg.start, seg.end, text)
-        segs.append((seg.start, seg.end, text))
-        if time.time() - last > 60:
-            ecoule = time.time() - t0
-            fait = max(seg.end / total, 1e-3)
-            log(f"… {fait:.0%} ({seg.end / 60:.1f}/{total / 60:.1f} min) "
-                f"| reste estimé ≈ {ecoule / fait * (1 - fait) / 60:.0f} min")
-            last = time.time()
-    sortie.fermer()
-    log(f"Transcription terminée en {(time.time() - t0) / 60:.1f} min")
 
-    if not segs:
-        erreur("Aucune parole détectée dans ce fichier.")
+        _, _, probas = model.detect_language(audio, vad_filter=True, language_detection_segments=8,
+                                             language_detection_threshold=0.9)
+        probas = dict(probas or [])
+        langue = max(LANGS, key=lambda l: probas.get(l, 0.0))
+        log(f"Langue : {langue} ({probas.get(langue, 0):.0%})")
 
+        segments, _ = model.transcribe(
+            audio, language=langue, vad_filter=True,
+            vad_parameters={"min_silence_duration_ms": 500},
+            beam_size=5, condition_on_previous_text=False,
+            no_speech_threshold=0.6, compression_ratio_threshold=2.4,
+        )
+        segs, prec, rep, last = [], None, 0, time.time()
+        srt_path = os.path.join(a.out, f"{prefixe}_sous-titres_{i:02d}.srt")
+        with open(srt_path, "w", encoding="utf-8") as srt:
+            for seg in segments:
+                t = seg.text.strip()
+                if not t or fantome(t):
+                    continue
+                rep = rep + 1 if t == prec else 0
+                prec = t
+                if rep >= 2:          # boucle d'hallucination
+                    continue
+                segs.append((seg.start, seg.end, t))
+                srt.write(f"{len(segs)}\n{ts(seg.start)} --> {ts(seg.end)}\n{t}\n\n")
+                srt.flush()
+                if time.time() - last > 60:
+                    fait = deja_fait + seg.end
+                    ecoule = time.time() - t0
+                    log(f"… {fait / total:.0%} | reste ≈ {ecoule / max(fait, 1) * (total - fait) / 60:.0f} min")
+                    last = time.time()
+                if (time.time() - DEBUT_JOB) / 60 > LIMITE_JOB_MIN:
+                    log("::warning::Temps limite proche : transcription arrêtée ici.")
+                    meta["incomplet"] = True
+                    break
+        deja_fait += dur
+
+        paras = paragraphes(segs)
+        txt.write(f"\n\n════════ SOURCE {i}/{len(sources)} : {s['titre']} "
+                  f"({NOMS[langue]}, {duree_txt(dur)}) ════════\n")
+        for debut, texte in paras:
+            txt.write(f"\n[{hhmm(debut)}] {texte}\n")
+        txt.flush()
+
+        nb_mots = sum(len(t.split()) for _, _, t in segs)
+        log(f"Source {i} : {len(segs)} segments, {nb_mots} mots")
+        seg_path = os.path.join(a.work, f"source_{i:02d}.json")
+        with open(seg_path, "w", encoding="utf-8") as f:
+            json.dump({"paragraphes": paras}, f, ensure_ascii=False)
+        meta["sources"].append({"n": i, "titre": s["titre"], "langue": langue, "duree": dur,
+                                "mots": nb_mots, "fichier": seg_path})
+        if meta["incomplet"]:
+            break
+
+    txt.close()
+    with open(os.path.join(a.work, "meta.json"), "w", encoding="utf-8") as f:
+        json.dump(meta, f, ensure_ascii=False, indent=1)
+    log(f"Transcription écrite : {chemin_txt} ({(time.time() - t0) / 60:.1f} min)")
+
+    if not any(s["mots"] for s in meta["sources"]):
+        print("::error::Aucune parole détectée.")
+        sys.exit(1)
+
+    # ---- Traduction optionnelle (par paragraphes entiers = meilleure qualité) ----
     cible = a.translate.lower()
     if cible not in LANGS:
         return
-    if cible == langue:
-        log("Traduction ignorée : la vidéo est déjà dans cette langue.")
-        return
-
-    log(f"Traduction {langue} -> {cible}…")
+    log(f"Traduction vers {NOMS[cible]}…")
+    chemin_t = os.path.join(a.out, f"{prefixe}_transcription.{cible}.txt")
     try:
-        trad = preparer_traduction(langue, cible)
-        sortie_t = Sortie(os.path.join(a.out, f"{base}.{cible}"))
-        for i, (s, e, t) in enumerate(segs, 1):
-            sortie_t.ajouter(s, e, trad(t))
-            if i % 200 == 0:
-                log(f"… traduction {i}/{len(segs)}")
-        sortie_t.fermer()
-    except Exception as exc:  # la transcription est déjà sauvée
-        erreur(f"La transcription est OK mais la traduction a échoué : {exc}", 3)
+        trads = {}
+        with open(chemin_t, "w", encoding="utf-8") as out:
+            out.write(f"TRANSCRIPTION TRADUITE ({NOMS[cible]}) — {len(meta['sources'])} source(s)\n")
+            for s in meta["sources"]:
+                with open(s["fichier"], encoding="utf-8") as f:
+                    paras = json.load(f)["paragraphes"]
+                out.write(f"\n\n════════ SOURCE {s['n']} : {s['titre']} ════════\n")
+                if s["langue"] == cible:
+                    for d, t in paras:
+                        out.write(f"\n[{hhmm(d)}] {t}\n")
+                    continue
+                if s["langue"] not in trads:
+                    trads[s["langue"]] = preparer_traduction(s["langue"], cible)
+                for k, (d, t) in enumerate(paras, 1):
+                    out.write(f"\n[{hhmm(d)}] {trads[s['langue']](t)}\n")
+                    out.flush()
+                    if k % 50 == 0:
+                        log(f"… source {s['n']} : {k}/{len(paras)} paragraphes")
+        log(f"Traduction écrite : {chemin_t}")
+    except Exception as exc:
+        if os.path.exists(chemin_t):
+            os.remove(chemin_t)          # pas de fichier à moitié traduit
+        print(f"::warning::La transcription est OK mais la traduction a échoué : {exc}")
 
 
 if __name__ == "__main__":
