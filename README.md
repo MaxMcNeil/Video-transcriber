@@ -43,17 +43,15 @@ Le résumé du run affiche le début du prompteur et de la transcription.
 
 ## YouTube bloqué ?
 YouTube refuse souvent les serveurs GitHub (« confirm you're not a bot »). Solutions :
-1. **Depuis le téléphone (recommandé, à utiliser pour tout lien YouTube)**, dans Termux :
+1. **Depuis le téléphone (recommandé, pour tout lien YouTube)** — installation unique dans Termux :
    ```bash
-   # une seule fois : installer le script
-   curl -fsSL -o ~/yt2release.sh https://raw.githubusercontent.com/MaxMcNeil/Video-transcriber/main/yt2release.sh
-
-   # à chaque fois : garder Termux actif puis lancer (un ou plusieurs liens)
-   termux-wake-lock
-   bash ~/yt2release.sh "LIEN1" "LIEN2"
+   curl -fsSL https://raw.githubusercontent.com/MaxMcNeil/Video-transcriber/main/termux-setup.sh | bash
    ```
-   Le téléphone télécharge l'audio seul, le dépose dans la Release **videos** et lance **un** workflow qui fusionne toutes les sources.
-   Le script active lui-même `termux-wake-lock` et le relâche à la fin ; options : `PROMPTEUR=ar DUREE=court bash ~/yt2release.sh LIEN`.
+   Ensuite, dans YouTube : **Partager → Termux**. C'est tout.
+   - Entrée (ou 15 s) : lance la transcription.
+   - `a` : garde le lien en attente ; le partage suivant lance tous les liens ensemble (un seul texte prompteur).
+   - Termux reste actif écran éteint (wake-lock), et le script se met à jour tout seul à chaque partage.
+   - Raccourci clavier possible : `yt LIEN1 LIEN2` (options : `PROMPTEUR=ar DUREE=court yt LIEN`).
 2. Dépose toi-même la vidéo dans la Release **videos** et lance avec `source` vide.
 3. Ajoute tes cookies YouTube : exporte-les au format Netscape (extension « Get cookies.txt LOCALLY »), puis Settings → Secrets and variables → Actions → secret `YT_COOKIES`. Utilise de préférence un compte Google secondaire.
 

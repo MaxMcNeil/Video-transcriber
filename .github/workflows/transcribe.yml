@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       source:
-        description: "Liens et/ou fichiers de la Release 'videos', séparés par ; (vide = dernière vidéo, tout = toute la Release). ⚠️ YouTube bloque GitHub : pour YouTube, lance plutôt dans Termux → termux-wake-lock; bash ~/yt2release.sh LIEN1 LIEN2"
+        description: "Liens et/ou fichiers de la Release 'videos', séparés par ; (vide = dernière vidéo, tout = toute la Release). ⚠️ YouTube bloque GitHub : pour YouTube, utilise Partager → Termux depuis l'appli YouTube (installation unique : voir README)"
         required: false
         default: ""
       prompteur:
