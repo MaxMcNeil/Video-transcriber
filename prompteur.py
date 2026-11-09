@@ -175,15 +175,18 @@ SYS_ECRITURE = ("Tu es le meilleur scénariste de chroniques YouTube d'actualit�
 NETTOYAGE = ("La matière vient d'une transcription automatique : elle peut contenir des erreurs de "
              "reconnaissance, de la musique, des paroles de chansons, des jingles, l'intro ou l'outro de la "
              "chaîne d'origine, de l'autopromotion, des publicités, la présentation de l'invité, des "
-             "remerciements et des appels à s'abonner. Ignore tout cela totalement et corrige les erreurs de "
-             "reconnaissance évidentes.")
+             "remerciements, des appels à s'abonner, des crédits, licences, références bibliographiques et "
+             "mentions techniques (date d'enregistrement, version, « article de qualité »…). Ignore tout cela "
+             "totalement. Les erreurs de reconnaissance (mots déformés, noms propres ou lieux mal orthographiés) "
+             "ne sont PAS du contenu : corrige-les silencieusement avec le mot juste quand il est évident, et ne "
+             "les mentionne jamais.")
 
 
 RUBRIQUES = """ANGLE : la phrase la plus choquante, absurde ou scandaleuse de toute la matière, en une ligne (servira de hook).
 FAITS : les faits essentiels, avec noms, lieux, dates et chiffres EXACTS tels qu'ils apparaissent (corrige seulement les erreurs évidentes de reconnaissance).
 CITATIONS : les déclarations les plus percutantes, presque mot pour mot, avec qui les a dites.
 SOUPÇONS : accusations, soupçons et rumeurs évoqués, avec qui les porte.
-ABSURDITÉS : contradictions, hypocrisies, détails ridicules à moquer."""
+ABSURDITÉS : contradictions, hypocrisies, détails ridicules DU SUJET à moquer (jamais les erreurs de transcription)."""
 
 
 def prompt_fiche(texte, titre, k, n, langue):
@@ -213,7 +216,7 @@ def prompt_relecture(texte, matiere):
 Repère les phrases du TEXTE qui doivent être supprimées :
 1. hallucination : fait, chiffre, nom, lieu, date ou citation absent de la FICHE ou différent de la FICHE ;
 2. nom ou étiquette d'intervenant, format dialogue ou questions-réponses d'interview ;
-3. mention d'interview, d'invité, de vidéo, de source, d'article, d'extrait ou de chaîne d'origine ;
+3. mention d'interview, d'invité, de vidéo, de source, d'article, d'extrait, de chaîne d'origine, de transcription, de licence ou de crédits ;
 4. reste de musique, chanson, jingle, générique ou publicité ;
 5. répétition d'une phrase déjà dite.
 L'humour, les exagérations comiques, les opinions et les accusations ou soupçons présents dans la fiche sont NORMAUX : ne les signale pas.
@@ -296,6 +299,7 @@ STYLE
 - EXACTITUDE : utilise les noms, lieux, dates et chiffres EXACTEMENT comme dans la fiche. N'ajoute aucun fait, chiffre, nom, date ou citation qui n'y figure pas. L'humour porte sur les faits, il n'en crée pas.
 - Chaque fait n'est dit qu'UNE fois. Aucune phrase répétée.
 - Jamais de nom ou d'étiquette d'intervenant, jamais de dialogue ni de questions-réponses : uniquement ma voix.
+- Ne parle jamais de transcription, d'erreurs de mots, de licence, de crédits ou de références : seulement du sujet.
 
 FORMAT PROMPTEUR
 - Texte brut : pas de titre, pas de markdown, pas d'astérisques, pas de listes, pas d'émojis, pas de didascalies, pas de crochets, pas de noms de parties.

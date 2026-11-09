@@ -19,6 +19,7 @@ Exemple de `source` : `https://youtu.be/xxx ; interview.mp4 ; https://x.com/.../
 ## Résultats (Release **transcriptions**, préfixe date + titre)
 - `…_transcription.txt` : **toutes les sources dans un seul fichier**, paragraphes horodatés
 - `…_prompteur.txt` : **le texte à coller dans le prompteur**
+- `…_fiche.txt` : la fiche de faits sur laquelle l'IA s'est appuyée (pour vérifier avant le live)
 - `…_transcription.<langue>.txt` : traduction, si demandée
 - `…_sous-titres_NN.srt` : sous-titres de chaque source
 
