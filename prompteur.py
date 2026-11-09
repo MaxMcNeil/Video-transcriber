@@ -20,7 +20,7 @@ import urllib.request
 
 ICI = os.path.dirname(os.path.abspath(__file__))
 PORT = 8088
-CTX = 16384
+CTX = 24576
 URL = f"http://127.0.0.1:{PORT}"
 LANGUE = {
     "fr": "français",
@@ -183,7 +183,7 @@ def prompt_extraction(texte, titre, k, n, langue):
     return f"""Voici un extrait de transcription automatique (source « {titre} », partie {k}/{n}).
 {NETTOYAGE}
 
-Extrait UNIQUEMENT la matière utile, en {LANGUE[langue]}, sous forme de puces courtes :
+Extrait UNIQUEMENT la matière utile, en {LANGUE[langue]}, sous forme de puces courtes (20 puces maximum, l'essentiel d'abord) :
 - faits, chiffres, dates, noms, lieux
 - déclarations marquantes : cite les plus percutantes presque mot pour mot, avec qui les a dites
 - accusations, soupçons et rumeurs évoqués : garde-les tous, en précisant que ce sont des accusations ou des soupçons et qui les porte
@@ -197,23 +197,58 @@ EXTRAIT :
 {texte}"""
 
 
-def prompt_relecture(texte, matiere, langue):
-    return f"""Tu es le vérificateur final avant le direct. Voici un texte de prompteur et la matière dont il est tiré.
+def prompt_relecture(texte, matiere):
+    return f"""Tu es le vérificateur final avant le direct. Compare le TEXTE à la MATIÈRE dont il est tiré.
 
-Corrige le texte, en {LANGUE[langue]}, selon ces règles strictes :
-1. Supprime ou reformule toute affirmation, tout chiffre, nom, date ou citation qui n'apparaît PAS dans la matière (hallucination).
-2. Supprime tout nom ou étiquette d'intervenant (« Journaliste : », « Invité : », « Untel : »), tout format dialogue ou questions-réponses : tout doit être dit par l'animateur seul.
-3. Supprime toute mention d'interview, d'invité, de vidéo, de source, d'article, d'extrait ou de chaîne d'origine, et tout reste de musique, chanson, jingle, générique ou publicité.
-4. Supprime les répétitions.
-5. Ne touche à RIEN d'autre : garde le ton, l'humour, la structure, les accusations et soupçons présents dans la matière, la longueur et la mise en forme (paragraphes séparés par une ligne vide).
+Repère les phrases du TEXTE qui doivent être supprimées :
+1. hallucination : affirmation, chiffre, nom, date ou citation absent de la MATIÈRE ;
+2. nom ou étiquette d'intervenant, format dialogue ou questions-réponses d'interview ;
+3. mention d'interview, d'invité, de vidéo, de source, d'article, d'extrait ou de chaîne d'origine ;
+4. reste de musique, chanson, jingle, générique ou publicité ;
+5. répétition d'une phrase déjà dite.
+L'humour, les exagérations comiques, les opinions et les accusations ou soupçons présents dans la matière sont NORMAUX : ne les signale pas.
 
-Réponds UNIQUEMENT avec le texte corrigé complet, sans commentaire.
+Réponds UNIQUEMENT avec les phrases à supprimer, copiées mot pour mot, une par ligne.
+S'il n'y en a aucune, réponds : AUCUNE
 
 MATIÈRE :
 {matiere}
 
-TEXTE À CORRIGER :
+TEXTE :
 {texte}"""
+
+
+def _norm(t):
+    return re.sub(r"[\W_]+", "", t.lower())
+
+
+def supprimer_phrases(texte, a_supprimer):
+    """Retire du texte les phrases signalées (correspondance tolérante). Garde-fou : max 25 %."""
+    cibles = []
+    for l in a_supprimer.split("\n"):
+        l = re.sub(r"^\s*([-*•]|\d+[.)])\s*", "", l).strip().strip("«»\"'“”")
+        n = _norm(l)
+        if len(n) >= 12 and not re.fullmatch(r"aucune?", n):
+            cibles.append(n)
+    if not cibles:
+        return texte, 0
+    paras = [re.split(r"(?<=[.!?…؟])\s+", p) for p in texte.strip().split("\n\n")]
+    total = sum(len(p) for p in paras)
+    retire, nouveaux = 0, []
+    for phrases in paras:
+        garde = []
+        for ph in phrases:
+            n = _norm(ph)
+            if len(n) >= 12 and any(c == n or c in n or (len(n) >= 25 and n in c) for c in cibles):
+                retire += 1
+            else:
+                garde.append(ph)
+        if garde:
+            nouveaux.append(" ".join(garde))
+    if retire > max(2, total * 0.25):
+        avertir(f"Relecture : {retire}/{total} phrases signalées, trop pour être fiable — rien retiré.")
+        return texte, 0
+    return "\n\n".join(nouveaux) + "\n", retire
 
 
 def prompt_condenser(notes, langue):
@@ -385,7 +420,7 @@ def generer(srv, conf, meta, langue, mots, chaine):
                 log(f"Extraction : source {s['n']} partie {k}/{len(morceaux)}")
                 r, _ = srv.chat(SYS_EXTRACTION,
                                 [{"role": "user", "content": prompt_extraction(m, s["titre"], k, len(morceaux), langue)}],
-                                1200, conf["extraction"])
+                                700, conf["extraction"])
                 if r.strip() and not re.fullmatch(r"\W*RIEN\W*", r.strip(), re.I):
                     notes.append(f"=== {s['titre']} ({k}/{len(morceaux)}) ===\n{r.strip()}")
         if not notes:
@@ -415,25 +450,38 @@ def generer(srv, conf, meta, langue, mots, chaine):
                  {"role": "user", "content": "Continue exactement là où tu t'es arrêté, même style et même format, jusqu'à la chute finale."}]
         suite, fin = srv.chat(SYS_ECRITURE, msgs, max_sortie, conf["ecriture"])
         texte = texte.rstrip() + "\n\n" + suite.lstrip()
-    # Relecture anti-hallucination si tout tient dans le contexte
-    entree = tokens_estimes(matiere + texte, langue) + 1500
-    sortie_relu = int(tokens_estimes(texte, langue) * 1.2) + 300
-    if entree + sortie_relu <= CTX:
-        log("Relecture anti-hallucinations…")
+    # Relecture anti-hallucinations : l'IA liste les phrases fautives, on les retire.
+    texte = nettoyer(texte)
+    paras = texte.strip().split("\n\n")
+    budget = CTX - tokens_estimes(matiere, langue) - 2500
+    if budget < 800:
+        avertir("Matière trop longue pour la relecture : relecture sautée.")
+        return texte
+    # découpe le texte en lots qui tiennent dans le contexte avec la matière
+    lots, cur = [], []
+    for p in paras:
+        if cur and tokens_estimes("\n\n".join(cur + [p]), langue) > budget:
+            lots.append(cur)
+            cur = []
+        cur.append(p)
+    if cur:
+        lots.append(cur)
+    resultat, total_retire = [], 0
+    for k, lot in enumerate(lots, 1):
+        bloc = "\n\n".join(lot)
+        log(f"Relecture anti-hallucinations ({k}/{len(lots)})…")
         try:
-            relu, fin = srv.chat(SYS_EXTRACTION,
-                                 [{"role": "user", "content": prompt_relecture(texte, matiere, langue)}],
-                                 sortie_relu, conf["extraction"])
-            if fin != "length" and not REFUS.search(relu[:400]) \
-                    and compter_mots(relu) >= 0.7 * compter_mots(texte):
-                texte = relu
-            else:
-                avertir("Relecture inexploitable : texte d'origine conservé.")
+            liste, _ = srv.chat(SYS_EXTRACTION, [{"role": "user", "content": prompt_relecture(bloc, matiere)}],
+                                900, conf["extraction"])
+            if REFUS.search(liste[:300]):
+                raise RuntimeError("refus")
+            bloc, n = supprimer_phrases(bloc, liste)
+            total_retire += n
         except Exception as e:
-            avertir(f"Relecture impossible ({e}) : texte d'origine conservé.")
-    else:
-        avertir("Texte trop long pour une relecture complète : relecture sautée.")
-    return texte
+            avertir(f"Relecture {k} impossible ({e}) : lot conservé tel quel.")
+        resultat.append(bloc.strip())
+    log(f"Relecture : {total_retire} phrase(s) retirée(s).")
+    return "\n\n".join(r for r in resultat if r) + "\n"
 
 
 def main():
@@ -462,7 +510,7 @@ def main():
             poids[s["langue"]] = poids.get(s["langue"], 0) + s["mots"]
         langue = max(poids, key=poids.get)
     total_mots = sum(s["mots"] for s in meta["sources"])
-    mots = LONGUEURS.get(a.duree) or min(1600, max(250, int(total_mots * 0.3)))
+    mots = LONGUEURS.get(a.duree) or min(1200, max(250, int(total_mots * 0.3)))
     if a.duree not in LONGUEURS:
         mots = min(mots, max(150, total_mots))      # jamais plus long que la matière
     chaine = config["chaines"].get(langue, "")

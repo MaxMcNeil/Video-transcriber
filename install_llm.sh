@@ -7,10 +7,20 @@ mkdir -p llm/bin
 
 essai_binaire() {
   local url
-  url="$(gh api repos/ggml-org/llama.cpp/releases/latest \
-        -q '.assets[] | select(.name | test("bin-ubuntu-x64\\.(zip|tar\\.gz)$")) | .browser_download_url' \
-        2>/dev/null | head -n1)"
-  [ -n "$url" ] || { echo "Binaire llama.cpp introuvable dans la dernière version."; return 1; }
+  local noms
+  # 5 dernières versions : la toute dernière peut être en cours de publication
+  noms="$(gh api "repos/ggml-org/llama.cpp/releases?per_page=5" -q '.[0].assets[].name' 2>&1)"
+  # binaire CPU Linux x64 : contient ubuntu/linux + x64, sans variante GPU/ARM
+  url="$(gh api "repos/ggml-org/llama.cpp/releases?per_page=5" \
+        -q '.[].assets[] | select(.name | test("(ubuntu|linux)"; "i") and test("x64|x86_64|amd64"; "i")
+                                 and (test("vulkan|cuda|rocm|hip|sycl|musa|openvino|kompute|arm|aarch64|s390|riscv|cann|opencl"; "i") | not)
+                                 and test("\\.(zip|tar\\.gz|tgz)$"))
+               | .browser_download_url' 2>/dev/null | head -n1)"
+  if [ -z "$url" ]; then
+    echo "Binaire llama.cpp CPU introuvable. Réponse / fichiers de la dernière version :"
+    printf '%s\n' "$noms" | head -n 40
+    return 1
+  fi
   echo "Téléchargement : $url"
   curl -fsSL --retry 5 --retry-delay 5 -o llm/paquet "$url" || return 1
   case "$url" in
