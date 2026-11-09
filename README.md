@@ -43,12 +43,17 @@ Le résumé du run affiche le début du prompteur et de la transcription.
 
 ## YouTube bloqué ?
 YouTube refuse souvent les serveurs GitHub (« confirm you're not a bot »). Solutions :
-1. **Depuis le téléphone (recommandé)**, dans Termux :
+1. **Depuis le téléphone (recommandé, à utiliser pour tout lien YouTube)**, dans Termux :
    ```bash
-   curl -fsSLO https://raw.githubusercontent.com/MaxMcNeil/Video-transcriber/main/yt2release.sh
-   bash yt2release.sh "LIEN_YOUTUBE"
+   # une seule fois : installer le script
+   curl -fsSL -o ~/yt2release.sh https://raw.githubusercontent.com/MaxMcNeil/Video-transcriber/main/yt2release.sh
+
+   # à chaque fois : garder Termux actif puis lancer (un ou plusieurs liens)
+   termux-wake-lock
+   bash ~/yt2release.sh "LIEN1" "LIEN2"
    ```
-   Le téléphone télécharge l'audio seul, le dépose dans la Release **videos** et lance le workflow.
+   Le téléphone télécharge l'audio seul, le dépose dans la Release **videos** et lance **un** workflow qui fusionne toutes les sources.
+   Le script active lui-même `termux-wake-lock` et le relâche à la fin ; options : `PROMPTEUR=ar DUREE=court bash ~/yt2release.sh LIEN`.
 2. Dépose toi-même la vidéo dans la Release **videos** et lance avec `source` vide.
 3. Ajoute tes cookies YouTube : exporte-les au format Netscape (extension « Get cookies.txt LOCALLY »), puis Settings → Secrets and variables → Actions → secret `YT_COOKIES`. Utilise de préférence un compte Google secondaire.
 

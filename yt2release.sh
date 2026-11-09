@@ -3,9 +3,17 @@
 # Télécharge l'audio de chaque lien depuis le téléphone, le dépose dans la
 # Release "videos", puis lance UNE transcription qui fusionne toutes les sources.
 #
-# Usage : bash yt2release.sh LIEN [LIEN2 …]
+# Installation (une seule fois) :
+#   curl -fsSL -o ~/yt2release.sh https://raw.githubusercontent.com/MaxMcNeil/Video-transcriber/main/yt2release.sh
+# Usage : bash ~/yt2release.sh LIEN [LIEN2 …]
 # Options (variables) : PROMPTEUR=auto|fr|ar|it|en|non  DUREE=auto|court|moyen|long
 set -uo pipefail
+
+# Garde Termux actif écran éteint (sinon Android coupe les longs téléchargements)
+if command -v termux-wake-lock >/dev/null; then
+  termux-wake-lock
+  trap 'termux-wake-unlock 2>/dev/null' EXIT
+fi
 REPO="MaxMcNeil/Video-transcriber"
 PROMPTEUR="${PROMPTEUR:-auto}"
 DUREE="${DUREE:-auto}"
