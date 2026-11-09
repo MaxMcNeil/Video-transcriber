@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       source:
-        description: "Liens et/ou fichiers de la Release 'videos', séparés par ; (vide = dernière vidéo, tout = toute la Release). ⚠️ YouTube bloque GitHub : pour YouTube, utilise Partager → Termux depuis l'appli YouTube (installation unique : voir README)"
+        description: "Liens et/ou fichiers de la Release 'videos', séparés par ; (vide = dernière vidéo, tout = toute la Release). ⚠️ YouTube bloque GitHub : pour YouTube, fais Partager → Termux dans l'appli YouTube. Installation unique dans Termux : curl -fsSL https://raw.githubusercontent.com/MaxMcNeil/Video-transcriber/main/termux-setup.sh | bash"
         required: false
         default: ""
       prompteur:
