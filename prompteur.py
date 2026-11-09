@@ -28,7 +28,7 @@ LANGUE = {
     "en": "anglais",
     "ar": "arabe standard moderne (فصحى), fluide et oral",
 }
-LONGUEURS = {"court": 450, "moyen": 1100, "long": 2000}
+LONGUEURS = {"court": 450, "moyen": 900, "long": 1500}
 REFUS = re.compile(
     r"je ne (peux|suis pas en mesure)|je suis désolé|i can(no|')t (help|assist|write|provide)"
     r"|i'm sorry|as an ai|en tant qu'(ia|intelligence)|non posso|mi dispiace|لا أستطيع|عذرًا|عذراً",
@@ -116,7 +116,7 @@ class Serveur:
             messages = [dict(m) for m in messages]
             messages[-1]["content"] += "\n/no_think"
         corps = {"messages": [{"role": "system", "content": systeme}] + messages,
-                 "max_tokens": max_tokens, "stream": False, **params}
+                 "max_tokens": max_tokens, "stream": False, "cache_prompt": True, **params}
         if self.conf.get("qwen3"):
             corps["chat_template_kwargs"] = {"enable_thinking": False}
         req = urllib.request.Request(URL + "/v1/chat/completions",
@@ -179,40 +179,47 @@ NETTOYAGE = ("La matière vient d'une transcription automatique : elle peut cont
              "reconnaissance évidentes.")
 
 
-def prompt_extraction(texte, titre, k, n, langue):
-    return f"""Voici un extrait de transcription automatique (source « {titre} », partie {k}/{n}).
+RUBRIQUES = """ANGLE : la phrase la plus choquante, absurde ou scandaleuse de toute la matière, en une ligne (servira de hook).
+FAITS : les faits essentiels, avec noms, lieux, dates et chiffres EXACTS tels qu'ils apparaissent (corrige seulement les erreurs évidentes de reconnaissance).
+CITATIONS : les déclarations les plus percutantes, presque mot pour mot, avec qui les a dites.
+SOUPÇONS : accusations, soupçons et rumeurs évoqués, avec qui les porte.
+ABSURDITÉS : contradictions, hypocrisies, détails ridicules à moquer."""
+
+
+def prompt_fiche(texte, titre, k, n, langue):
+    partie = f", partie {k}/{n}" if n > 1 else ""
+    return f"""Voici une transcription automatique (« {titre} »{partie}).
 {NETTOYAGE}
 
-Extrait UNIQUEMENT la matière utile, en {LANGUE[langue]}, sous forme de puces courtes (20 puces maximum, l'essentiel d'abord) :
-- faits, chiffres, dates, noms, lieux
-- déclarations marquantes : cite les plus percutantes presque mot pour mot, avec qui les a dites
-- accusations, soupçons et rumeurs évoqués : garde-les tous, en précisant que ce sont des accusations ou des soupçons et qui les porte
-- arguments forts, contradictions, hypocrisies, moments absurdes ou ridicules exploitables en humour
-- anecdotes et exemples concrets
+Rédige en {LANGUE[langue]} la FICHE DE PRÉPARATION d'une chronique, avec exactement ces rubriques :
+{RUBRIQUES}
 
-N'invente rien. Ne commente pas. Pas d'introduction ni de conclusion.
-Si l'extrait ne contient rien d'utile, réponds seulement : RIEN
+Puces courtes, 35 puces au maximum en tout, l'essentiel d'abord. N'invente rien, ne commente pas.
+Rubrique sans contenu : écris « — ». Si la transcription ne contient rien d'utile, réponds seulement : RIEN
 
-EXTRAIT :
+TRANSCRIPTION :
 {texte}"""
 
 
+def bloc_matiere(matiere):
+    # Placée en tête et identique d'une étape à l'autre : le moteur réutilise son cache
+    # au lieu de relire toute la matière (gros gain de temps sur CPU).
+    return f"FICHE :\n{matiere}\n\n────────\n\n"
+
+
 def prompt_relecture(texte, matiere):
-    return f"""Tu es le vérificateur final avant le direct. Compare le TEXTE à la MATIÈRE dont il est tiré.
+    return f"""{bloc_matiere(matiere)}Tu es maintenant le vérificateur final avant le direct. Compare le TEXTE ci-dessous à la FICHE ci-dessus.
 
 Repère les phrases du TEXTE qui doivent être supprimées :
-1. hallucination : affirmation, chiffre, nom, date ou citation absent de la MATIÈRE ;
+1. hallucination : fait, chiffre, nom, lieu, date ou citation absent de la FICHE ou différent de la FICHE ;
 2. nom ou étiquette d'intervenant, format dialogue ou questions-réponses d'interview ;
 3. mention d'interview, d'invité, de vidéo, de source, d'article, d'extrait ou de chaîne d'origine ;
 4. reste de musique, chanson, jingle, générique ou publicité ;
 5. répétition d'une phrase déjà dite.
-L'humour, les exagérations comiques, les opinions et les accusations ou soupçons présents dans la matière sont NORMAUX : ne les signale pas.
+L'humour, les exagérations comiques, les opinions et les accusations ou soupçons présents dans la fiche sont NORMAUX : ne les signale pas.
 
 Réponds UNIQUEMENT avec les phrases à supprimer, copiées mot pour mot, une par ligne.
 S'il n'y en a aucune, réponds : AUCUNE
-
-MATIÈRE :
-{matiere}
 
 TEXTE :
 {texte}"""
@@ -251,51 +258,49 @@ def supprimer_phrases(texte, a_supprimer):
     return "\n\n".join(nouveaux) + "\n", retire
 
 
-def prompt_condenser(notes, langue):
-    return f"""Voici des notes de préparation, en vrac. Fusionne-les en une liste de puces en {LANGUE[langue]} :
-supprime les doublons, regroupe par sujet, garde TOUS les faits marquants, chiffres, noms, citations
-percutantes, accusations et soupçons (présentés comme tels) et moments absurdes. Réduis la longueur
-d'environ moitié. N'invente rien. Pas d'introduction.
+def prompt_fusion(fiches, langue):
+    return f"""Voici plusieurs fiches de préparation tirées de sources différentes sur le même live.
+Fusionne-les en UNE seule fiche cohérente, en {LANGUE[langue]}, avec exactement ces rubriques :
+{RUBRIQUES}
 
-NOTES :
-{notes}"""
+Un seul ANGLE (le plus fort de tous). Supprime les doublons, regroupe par sujet, garde tous les noms,
+chiffres, citations et soupçons importants. 40 puces au maximum. N'invente rien. Pas de commentaire.
+
+FICHES :
+{fiches}"""
 
 
-def prompt_ecriture(matiere, titres, langue, mots, chaine, brute):
+def prompt_ecriture(fiche, nb_sources, langue, mots, chaine):
     chaine_txt = f" de la chaîne « {chaine} »" if chaine else ""
     chaine_cta = f" à « {chaine} »" if chaine else ""
-    nature = NETTOYAGE if brute else "La matière est un ensemble de notes de préparation."
-    plusieurs = len(titres) > 1
-    return f"""Écris le texte de prompteur de mon prochain passage en live, en {LANGUE[langue]}, à partir de la matière ci-dessous{f" ({len(titres)} sources)" if plusieurs else ""}.
-{nature}
+    vous = " Vouvoie toujours le public (« vous »), jamais de tutoiement." if langue == "fr" else ""
+    return f"""{bloc_matiere(fiche)}Écris le texte de prompteur de mon prochain passage en live, en {LANGUE[langue]}, à partir de la FICHE ci-dessus{f" (tirée de {nb_sources} sources)" if nb_sources > 1 else ""}.
 
 QUI PARLE
-- C'est moi, l'animateur{chaine_txt}, qui parle à la première personne, en direct, à mon public (« vous »).
-- Tout ce que disent un invité, un interviewé, un journaliste ou un autre commentateur devient MON propos, raconté par moi naturellement, comme si c'était mon analyse. Ne mentionne jamais d'interview, d'invité, de « vidéo », de « source », d'« article », d'« extrait » ni la chaîne d'origine.
+- C'est moi, l'animateur{chaine_txt}, qui parle à la première personne, en direct, à mon public.{vous}
+- Tout ce qui vient d'un invité, d'un interviewé, d'un journaliste ou d'un autre commentateur devient MON analyse, racontée naturellement. Ne mentionne jamais d'interview, d'invité, de vidéo, de source, d'article, d'extrait, de fiche ni de chaîne d'origine.
 - Les déclarations des personnalités qui FONT l'actualité restent les leurs (« Untel a osé dire que… ») et je réagis dessus.
-{"- Les sources forment UNE seule histoire cohérente du début à la fin : regroupe par idées, transitions naturelles, aucune répétition, jamais source par source." if plusieurs else ""}
+{"- Une seule histoire cohérente du début à la fin, regroupée par idées, avec des transitions naturelles." if nb_sources > 1 else ""}
 
 STRUCTURE (rétention maximale)
-1. HOOK, 2 à 4 phrases : commence directement par le fait le plus choquant, une question qui dérange, un paradoxe ou un chiffre fou. Jamais de « bonjour » ni de présentation avant le hook.
-2. Ensuite seulement : une salutation très courte, puis une PROMESSE de ce qu'ils vont découvrir s'ils restent jusqu'au bout. Garde la meilleure révélation pour la fin.
-3. Le CORPS en 3 à 6 blocs qui montent en intensité. Chaque bloc s'ouvre par une relance (teasing, question, « et attendez, ce n'est pas le pire »). Une relance ou une punchline toutes les 4 à 6 phrases.
-4. Vers le milieu, un appel court et drôle à liker et commenter, glissé naturellement.
-5. La CHUTE : la révélation promise, une punchline finale mémorable, puis un appel à s'abonner{chaine_cta} et une question précise pour les commentaires.
+1. HOOK, 2 à 4 phrases, construit sur l'ANGLE : le fait le plus choquant, une question qui dérange ou un paradoxe. Jamais de « bonjour » avant le hook.
+2. Une salutation très courte, puis une PROMESSE de ce qu'ils vont découvrir s'ils restent. Garde le meilleur pour la fin.
+3. Le CORPS en 3 à 5 blocs qui montent en intensité. Chaque bloc s'ouvre par une relance. Une punchline ou une relance toutes les 4 à 6 phrases.
+4. Au milieu exactement, un appel court et drôle à liker et commenter.
+5. La CHUTE : la révélation promise, une punchline finale, puis un appel à s'abonner{chaine_cta} et UNE question précise pour les commentaires. Rien après.
 
 STYLE
-- Oral, vivant, naturel, comme si j'improvisais. Phrases courtes (20 mots maximum), rythme rapide, quelques phrases d'un seul mot.
-- Ton moqueur, ironique, sarcastique, humour noir assumé : comparaisons absurdes, faux étonnement, exagérations comiques. L'humour vise les puissants, les absurdités et les hypocrisies.
-- Aucune autocensure : garde tous les faits, accusations, soupçons et rumeurs de la matière, sans les adoucir. Présente les soupçons comme des soupçons (« on raconte que », « selon… ») : c'est plus fort et plus crédible.
-- N'invente aucun fait, chiffre, nom, date ou citation absent de la matière. Dans le doute, n'en parle pas.
-- Jamais de nom ou d'étiquette d'intervenant (« Journaliste : », « Invité : », « Untel : »), jamais de dialogue, jamais de questions-réponses d'interview : uniquement ma voix.
+- Oral, vivant, comme si j'improvisais. Phrases courtes (20 mots maximum), quelques phrases d'un seul mot.
+- Ton moqueur, ironique, sarcastique, humour noir assumé : comparaisons absurdes, faux étonnement, exagérations comiques visant les puissants, les absurdités et les hypocrisies. Exemples de tournures (ne les copie pas toutes) : « Vous allez rire. Ou pleurer. Probablement les deux. » ; « Alors là, accrochez-vous. » ; « Rassurez-vous, ça empire. »
+- Aucune autocensure : garde tous les faits, citations et soupçons de la fiche, sans les adoucir. Les soupçons restent présentés comme des soupçons (« on raconte que », « selon… »).
+- EXACTITUDE : utilise les noms, lieux, dates et chiffres EXACTEMENT comme dans la fiche. N'ajoute aucun fait, chiffre, nom, date ou citation qui n'y figure pas. L'humour porte sur les faits, il n'en crée pas.
+- Chaque fait n'est dit qu'UNE fois. Aucune phrase répétée.
+- Jamais de nom ou d'étiquette d'intervenant, jamais de dialogue ni de questions-réponses : uniquement ma voix.
 
 FORMAT PROMPTEUR
-- Texte brut uniquement : pas de titre, pas de markdown, pas d'astérisques, pas de listes, pas d'émojis, pas d'indications de mise en scène, pas de crochets, pas de noms de parties (« hook », « chute »…).
+- Texte brut : pas de titre, pas de markdown, pas d'astérisques, pas de listes, pas d'émojis, pas de didascalies, pas de crochets, pas de noms de parties.
 - Un paragraphe = une idée, 1 à 4 phrases. Une ligne vide entre les paragraphes.
-- Longueur : environ {mots} mots.
-
-MATIÈRE :
-{matiere}"""
+- Longueur : environ {mots} mots."""
 
 
 # ───────────────────────── Nettoyage du texte final ─────────────────────────
@@ -367,6 +372,29 @@ def nettoyer(texte):
     return "\n\n".join(paras) + "\n"
 
 
+def dedoublonner(texte):
+    """Supprime les phrases répétées ou quasi identiques (défaut courant des petits modèles)."""
+    vues, paras, retire = [], [], 0
+    for p in texte.strip().split("\n\n"):
+        garde = []
+        for ph in re.split(r"(?<=[.!?…؟])\s+", p):
+            mots_ph = set(re.findall(r"\w+", ph.lower()))
+            n = _norm(ph)
+            doublon = len(n) >= 20 and any(
+                n == v[0] or (len(mots_ph) >= 6 and len(mots_ph & v[1]) / len(mots_ph | v[1]) >= 0.8)
+                for v in vues)
+            if doublon:
+                retire += 1
+                continue
+            vues.append((n, mots_ph))
+            garde.append(ph)
+        if garde:
+            paras.append(" ".join(garde))
+    if retire:
+        log(f"Dédoublonnage : {retire} phrase(s) répétée(s) retirée(s).")
+    return "\n\n".join(paras) + "\n"
+
+
 def compter_mots(t):
     return len(t.split())
 
@@ -395,51 +423,58 @@ def decouper(texte, max_tok, langue):
     return morceaux
 
 
-def generer(srv, conf, meta, langue, mots, chaine):
-    titres = [s["titre"] for s in meta["sources"]]
-    textes = []
+def preparer_fiche(srv, conf, meta, langue):
+    # 1) une FICHE par morceau de transcription (gros morceaux = moins d'appels)
+    fiches = []
     for s in meta["sources"]:
         with open(s["fichier"], encoding="utf-8") as f:
-            paras = json.load(f)["paragraphes"]
-        textes.append((s, "\n".join(t for _, t in paras)))
+            texte = "\n".join(t for _, t in json.load(f)["paragraphes"])
+        morceaux = decouper(texte, 11000, s["langue"])
+        for k, m in enumerate(morceaux, 1):
+            log(f"Fiche : source {s['n']}/{len(meta['sources'])}, partie {k}/{len(morceaux)}")
+            r, _ = srv.chat(SYS_EXTRACTION,
+                            [{"role": "user", "content": prompt_fiche(m, s["titre"], k, len(morceaux), langue)}],
+                            1500, conf["extraction"])
+            r = r.strip()
+            if r and not re.fullmatch(r"\W*RIEN\W*", r, re.I):
+                fiches.append(r)
+    if not fiches:
+        raise RuntimeError("aucune matière utile trouvée dans les transcriptions")
 
+    # 2) fusion en UNE fiche (cohérence multi-sources)
+    while len(fiches) > 1:
+        groupes, cur = [], []
+        for f_ in fiches:
+            if cur and tokens_estimes("\n\n".join(cur + [f_]), langue) > 9000:
+                groupes.append(cur)
+                cur = []
+            cur.append(f_)
+        groupes.append(cur)
+        log(f"Fusion de {len(fiches)} fiches en {len(groupes)}…")
+        nouvelles = []
+        for g in groupes:
+            if len(g) == 1:
+                nouvelles.append(g[0])
+                continue
+            corps = "\n\n".join(f"--- FICHE {i} ---\n{x}" for i, x in enumerate(g, 1))
+            r, _ = srv.chat(SYS_EXTRACTION, [{"role": "user", "content": prompt_fusion(corps, langue)}],
+                            1800, conf["extraction"])
+            nouvelles.append(r.strip() or g[0])
+        if len(nouvelles) >= len(fiches):        # sécurité anti-boucle
+            fiches = ["\n\n".join(nouvelles)]
+            break
+        fiches = nouvelles
+    fiche = fiches[0]
+    with open(os.path.join("out", f"{meta['prefixe']}_fiche.txt"), "w", encoding="utf-8") as f:
+        f.write(fiche.strip() + "\n")              # pour vérifier d'où viennent les faits
+    return fiche
+
+
+def ecrire(srv, conf, fiche, meta, langue, mots, chaine):
+    # 3) écriture depuis la fiche
     tpw = 2.6 if langue == "ar" else 1.8
-    max_sortie = min(int(mots * tpw * 1.25) + 300, 7000)
-    budget_entree = CTX - max_sortie - 1800
-    brut = "\n\n".join(f"=== {s['titre']} ===\n{t}" for s, t in textes)
-    lg_src = max(meta["sources"], key=lambda s: s["mots"])["langue"]
-
-    if tokens_estimes(brut, lg_src) <= budget_entree:
-        log("Matière assez courte : écriture directe depuis la transcription.")
-        matiere, est_brut = brut, True
-    else:
-        notes = []
-        for s, t in textes:
-            morceaux = decouper(t, 4500, s["langue"])
-            for k, m in enumerate(morceaux, 1):
-                log(f"Extraction : source {s['n']} partie {k}/{len(morceaux)}")
-                r, _ = srv.chat(SYS_EXTRACTION,
-                                [{"role": "user", "content": prompt_extraction(m, s["titre"], k, len(morceaux), langue)}],
-                                700, conf["extraction"])
-                if r.strip() and not re.fullmatch(r"\W*RIEN\W*", r.strip(), re.I):
-                    notes.append(f"=== {s['titre']} ({k}/{len(morceaux)}) ===\n{r.strip()}")
-        if not notes:
-            raise RuntimeError("aucune matière utile trouvée dans les transcriptions")
-        matiere = "\n\n".join(notes)
-        tour = 0
-        while tokens_estimes(matiere, langue) > budget_entree and tour < 4:
-            tour += 1
-            groupes = decouper(matiere, 5000, langue)
-            log(f"Condensation des notes (tour {tour}, {len(groupes)} groupe(s))")
-            condenses = []
-            for g in groupes:
-                r, _ = srv.chat(SYS_EXTRACTION, [{"role": "user", "content": prompt_condenser(g, langue)}],
-                                2500, conf["extraction"])
-                condenses.append(r.strip())
-            matiere = "\n\n".join(condenses)
-        est_brut = False
-
-    msgs = [{"role": "user", "content": prompt_ecriture(matiere, titres, langue, mots, chaine, est_brut)}]
+    max_sortie = min(int(mots * tpw * 1.3) + 300, 6000)
+    msgs = [{"role": "user", "content": prompt_ecriture(fiche, len(meta["sources"]), langue, mots, chaine)}]
     log(f"Écriture du texte prompteur (~{mots} mots, {LANGUE[langue].split(' (')[0]})…")
     texte, fin = srv.chat(SYS_ECRITURE, msgs, max_sortie, conf["ecriture"])
     suites = 0
@@ -450,38 +485,23 @@ def generer(srv, conf, meta, langue, mots, chaine):
                  {"role": "user", "content": "Continue exactement là où tu t'es arrêté, même style et même format, jusqu'à la chute finale."}]
         suite, fin = srv.chat(SYS_ECRITURE, msgs, max_sortie, conf["ecriture"])
         texte = texte.rstrip() + "\n\n" + suite.lstrip()
-    # Relecture anti-hallucinations : l'IA liste les phrases fautives, on les retire.
-    texte = nettoyer(texte)
-    paras = texte.strip().split("\n\n")
-    budget = CTX - tokens_estimes(matiere, langue) - 2500
-    if budget < 800:
-        avertir("Matière trop longue pour la relecture : relecture sautée.")
-        return texte
-    # découpe le texte en lots qui tiennent dans le contexte avec la matière
-    lots, cur = [], []
-    for p in paras:
-        if cur and tokens_estimes("\n\n".join(cur + [p]), langue) > budget:
-            lots.append(cur)
-            cur = []
-        cur.append(p)
-    if cur:
-        lots.append(cur)
-    resultat, total_retire = [], 0
-    for k, lot in enumerate(lots, 1):
-        bloc = "\n\n".join(lot)
-        log(f"Relecture anti-hallucinations ({k}/{len(lots)})…")
-        try:
-            liste, _ = srv.chat(SYS_EXTRACTION, [{"role": "user", "content": prompt_relecture(bloc, matiere)}],
-                                900, conf["extraction"])
-            if REFUS.search(liste[:300]):
-                raise RuntimeError("refus")
-            bloc, n = supprimer_phrases(bloc, liste)
-            total_retire += n
-        except Exception as e:
-            avertir(f"Relecture {k} impossible ({e}) : lot conservé tel quel.")
-        resultat.append(bloc.strip())
-    log(f"Relecture : {total_retire} phrase(s) retirée(s).")
-    return "\n\n".join(r for r in resultat if r) + "\n"
+    return texte
+
+
+def finaliser(srv, conf, texte, fiche):
+    # 4) nettoyage, dédoublonnage, relecture contre la fiche (préfixe en cache)
+    texte = dedoublonner(nettoyer(texte))
+    log("Relecture anti-hallucinations…")
+    try:
+        liste, _ = srv.chat(SYS_ECRITURE, [{"role": "user", "content": prompt_relecture(texte, fiche)}],
+                            900, conf["extraction"])
+        if REFUS.search(liste[:300]):
+            raise RuntimeError("refus")
+        texte, n = supprimer_phrases(texte, liste)
+        log(f"Relecture : {n} phrase(s) retirée(s).")
+    except Exception as e:
+        avertir(f"Relecture impossible ({e}) : texte conservé tel quel.")
+    return texte
 
 
 def main():
@@ -510,7 +530,7 @@ def main():
             poids[s["langue"]] = poids.get(s["langue"], 0) + s["mots"]
         langue = max(poids, key=poids.get)
     total_mots = sum(s["mots"] for s in meta["sources"])
-    mots = LONGUEURS.get(a.duree) or min(1200, max(250, int(total_mots * 0.3)))
+    mots = LONGUEURS.get(a.duree) or min(900, max(250, int(total_mots * 0.25)))
     if a.duree not in LONGUEURS:
         mots = min(mots, max(150, total_mots))      # jamais plus long que la matière
     chaine = config["chaines"].get(langue, "")
@@ -518,40 +538,66 @@ def main():
     ordre = [a.ia] + [k for k in config["ia"] if k != a.ia]
     if a.ia not in config["ia"]:
         ordre = list(config["ia"])
-    dernier_err = None
+    t_debut = time.time()
+    limite = float(os.environ.get("PROMPTEUR_LIMITE_MIN", "160"))
+    if os.environ.get("JOB_START"):                   # le job entier est limité à 350 min
+        limite = min(limite, 340 - (time.time() - float(os.environ["JOB_START"])) / 60)
+    log(f"Temps disponible pour le prompteur : {limite:.0f} min")
+
+    def reste_min():
+        return limite - (time.time() - t_debut) / 60
+
+    sortie = os.path.join(a.out, f"{meta['prefixe']}_prompteur.txt")
+
+    def publier(texte, nom_ia, note=""):
+        with open(sortie, "w", encoding="utf-8") as f:
+            f.write(texte)
+        n = compter_mots(texte)
+        log(f"Texte prompteur écrit : {sortie} — {n} mots ≈ {max(1, round(n / 150))} min de lecture "
+            f"({LANGUE[langue].split(' (')[0]}, IA {nom_ia}){note}")
+
+    fiche, meilleur, dernier_err = None, ("", ""), None
     for nom_ia in ordre[:2]:
         conf = config["ia"][nom_ia]
         srv = None
         try:
             log(f"── IA locale : {nom_ia}")
-            chemin = telecharger_modele(conf)
-            srv = Serveur(chemin, conf)
+            srv = Serveur(telecharger_modele(conf), conf)
             srv.demarrer()
+            if fiche is None:
+                fiche = preparer_fiche(srv, conf, meta, langue)   # calculée une seule fois
             for essai in range(2):
-                brut = generer(srv, conf, meta, langue, mots, chaine)
+                if essai and reste_min() < 25:
+                    avertir("Temps insuffisant pour un nouvel essai.")
+                    break
+                brut = ecrire(srv, conf, fiche, meta, langue, mots, chaine)
                 if REFUS.search(brut[:400]):
                     avertir(f"{nom_ia} a refusé d'écrire (essai {essai + 1}).")
                     continue
-                texte = nettoyer(brut)
+                texte = finaliser(srv, conf, brut, fiche)
                 n = compter_mots(texte)
-                if n < mots * 0.35:
-                    avertir(f"Texte trop court ({n} mots pour ~{mots}), nouvel essai.")
-                    continue
-                sortie = os.path.join(a.out, f"{meta['prefixe']}_prompteur.txt")
-                with open(sortie, "w", encoding="utf-8") as f:
-                    f.write(texte)
-                log(f"Texte prompteur écrit : {sortie} — {n} mots ≈ {n / 150:.0f} min de lecture "
-                    f"({LANGUE[langue].split(' (')[0]}, IA {nom_ia})")
-                return
-            dernier_err = RuntimeError(f"{nom_ia} n'a pas produit de texte exploitable")
+                if n > compter_mots(meilleur[0]):
+                    meilleur = (texte, nom_ia)
+                if n >= mots * 0.35:
+                    publier(texte, nom_ia)
+                    return
+                avertir(f"Texte trop court ({n} mots pour ~{mots}).")
+            dernier_err = RuntimeError(f"{nom_ia} n'a pas produit de texte satisfaisant")
         except Exception as e:
             dernier_err = e
             avertir(f"Échec avec {nom_ia} : {e}")
         finally:
             if srv:
                 srv.arreter()
-        if nom_ia != ordre[-1]:
+        if reste_min() < 30:
+            avertir("Temps insuffisant pour essayer l'autre IA.")
+            break
+        if nom_ia != ordre[1]:
             log("Bascule sur l'autre IA locale.")
+    if meilleur[0].strip():
+        publier(meilleur[0], meilleur[1], " — plus court que prévu")
+        avertir("Texte prompteur publié mais plus court que la longueur visée.")
+        return
     print(f"::error::Texte prompteur impossible : {dernier_err}. La transcription reste disponible.")
     sys.exit(1)
 
