@@ -60,6 +60,36 @@ rm -rf "$TMP"
 [ ${#noms[@]} -gt 0 ] || { echo "Aucune source envoyée : rien à lancer."; exit 1; }
 liste="$(printf '%s ; ' "${noms[@]}")"
 liste="${liste% ; }"
-gh workflow run transcribe.yml -R "$REPO" -f source="$liste" \
-  -f prompteur="$PROMPTEUR" -f duree_prompteur="$DUREE"
-echo "Transcription lancée pour ${#noms[@]} source(s). Suivi : https://github.com/$REPO/actions"
+# Lancement + vérification que GitHub a vraiment démarré le run
+# (en cas de rejet au démarrage — « startup failure » — relance automatique)
+lancer() {
+  gh workflow run transcribe.yml -R "$REPO" -f source="$liste" \
+    -f prompteur="$PROMPTEUR" -f duree_prompteur="$DUREE"
+}
+avant="$(gh run list -R "$REPO" -w transcribe.yml -L 1 --json databaseId -q '.[0].databaseId' 2>/dev/null)"
+for essai in 1 2 3; do
+  if ! lancer; then
+    echo "⚠️  Lancement refusé (essai $essai), nouvel essai dans 20 s…"; sleep 20; continue
+  fi
+  id=""
+  for _ in $(seq 1 12); do
+    sleep 5
+    id="$(gh run list -R "$REPO" -w transcribe.yml -L 1 --json databaseId -q '.[0].databaseId' 2>/dev/null)"
+    [ -n "$id" ] && [ "$id" != "$avant" ] && break
+  done
+  if [ -z "$id" ] || [ "$id" = "$avant" ]; then
+    echo "⚠️  Run introuvable (essai $essai), nouvel essai…"; continue
+  fi
+  sleep 20
+  etat="$(gh run view "$id" -R "$REPO" --json status,conclusion -q '.status+" "+.conclusion' 2>/dev/null)"
+  case "$etat" in
+    *startup_failure*)
+      echo "⚠️  GitHub a rejeté le run au démarrage ($etat), relance automatique…"
+      avant="$id"; sleep 15; continue ;;
+  esac
+  echo "✅ Transcription lancée pour ${#noms[@]} source(s) : https://github.com/$REPO/actions/runs/$id"
+  exit 0
+done
+echo "❌ GitHub refuse de démarrer le run après 3 essais. Réessaie plus tard (les fichiers sont déjà dans la Release 'videos' :"
+echo "   lance « Transcribe » depuis Actions avec source = $liste)"
+exit 1
