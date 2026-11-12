@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       source:
-        description: "Liens et/ou fichiers de la Release 'videos', séparés par ; (vide = dernière vidéo, tout = toute la Release). ⚠️ YouTube bloque GitHub : pour YouTube, fais Partager → Termux dans l'appli YouTube. Installation unique dans Termux : curl -fsSL https://raw.githubusercontent.com/MaxMcNeil/Video-transcriber/main/termux-setup.sh | bash"
+        description: "Liens et/ou fichiers de la Release 'videos', séparés par ; (VIDE = toutes les nouvelles vidéos de la Release, sinon le dernier lot ; tout = toute la Release). ⚠️ YouTube bloque GitHub : pour YouTube, fais Partager → Termux dans l'appli YouTube. Installation unique dans Termux : curl -fsSL https://raw.githubusercontent.com/MaxMcNeil/Video-transcriber/main/termux-setup.sh | bash"
         required: false
         default: ""
       prompteur:
@@ -144,6 +144,12 @@ jobs:
             gh release create transcriptions -t "Transcriptions" -n "Transcriptions et textes prompteur"
           shopt -s nullglob
           gh release upload transcriptions out/*.txt out/*.srt --clobber
+          # mémorise les vidéos de la Release déjà transcrites (source vide = seulement les nouvelles)
+          if [ -s in/ids_release.txt ]; then
+            gh release download transcriptions -p "_videos_deja_traitees.txt" -O deja.txt --clobber 2>/dev/null || : > deja.txt
+            cat deja.txt in/ids_release.txt | sed '/^$/d' | sort -u > _videos_deja_traitees.txt
+            gh release upload transcriptions _videos_deja_traitees.txt --clobber
+          fi
           {
             echo "## Résultats (Release **transcriptions**)"
             for f in out/*.txt out/*.srt; do echo "- \`$(basename "$f")\`"; done

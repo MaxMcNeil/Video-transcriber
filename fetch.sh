@@ -27,11 +27,42 @@ liste_release() {
         -n "Dépose ici les vidéos à transcrire." >/dev/null 2>&1 || true
       return 1
     fi
-    # ordre de dépôt : du plus ancien au plus récent
-    LISTE_RELEASE="$(gh api "repos/$REPO/releases/tags/videos" \
-      -q '.assets | sort_by(.created_at) | .[].name')"
+    # id<TAB>nom<TAB>date, ordre de dépôt (du plus ancien au plus récent) ; « _… » = fichiers internes
+    ASSETS_TSV="$(gh api "repos/$REPO/releases/tags/videos" \
+      -q '.assets | map(select(.name | startswith("_") | not)) | sort_by(.created_at) | .[]
+          | "\(.id)\t\(.name)\t\(.created_at)"')"
+    LISTE_RELEASE="$(printf '%s\n' "$ASSETS_TSV" | cut -f2 | sed '/^$/d')"
   fi
   [ -n "$LISTE_RELEASE" ]
+}
+
+# id GitHub d'un fichier de la Release (pour se souvenir de ce qui est déjà traité)
+id_de() { printf '%s\n' "$ASSETS_TSV" | awk -F'\t' -v n="$1" '$2 == n { print $1; exit }'; }
+
+# Vidéos déjà transcrites (liste tenue par le workflow dans la Release « transcriptions »)
+DEJA="in/.deja_traitees.txt"
+charger_deja() {
+  : > "$DEJA"
+  gh release download transcriptions -R "$REPO" -p "_videos_deja_traitees.txt" -O "$DEJA" --clobber \
+    >/dev/null 2>&1 || : > "$DEJA"
+}
+
+# Source vide : toutes les vidéos NOUVELLES ; s'il n'y en a pas, le DERNIER LOT déposé
+# (fichiers ajoutés dans les 30 min autour du plus récent).
+selection_auto() {
+  charger_deja
+  local nouvelles
+  nouvelles="$(printf '%s\n' "$ASSETS_TSV" | awk -F'\t' -v f="$DEJA" 'BEGIN { while ((getline l < f) > 0) vu[l] = 1 } $1 != "" && !($1 in vu) { print $2 }')"
+  if [ -n "$nouvelles" ]; then
+    echo "Source vide : $(printf '%s\n' "$nouvelles" | grep -c .) nouvelle(s) vidéo(s) jamais transcrite(s)." >&2
+    printf '%s\n' "$nouvelles"
+    return
+  fi
+  echo "Source vide : aucune nouvelle vidéo → reprise du dernier lot déposé." >&2
+  gh api "repos/$REPO/releases/tags/videos" \
+    -q '.assets | map(select(.name | startswith("_") | not)) | sort_by(.created_at)
+        | (map(.created_at | fromdateiso8601) | max) as $t
+        | map(select((.created_at | fromdateiso8601) >= $t - 1800)) | .[].name'
 }
 
 # $1 = nom demandé (tolère espaces, majuscules, extension absente)
@@ -89,7 +120,7 @@ SRC="$(trim "$SRC")"
 items=()
 case "${SRC,,}" in
   "")
-    if liste_release; then items+=("$(printf '%s\n' "$LISTE_RELEASE" | tail -n1)")
+    if liste_release; then mapfile -t items < <(selection_auto | sed '/^$/d')
     else echo "::error::Release 'videos' vide ou absente : dépose une vidéo dedans ou donne un lien."; exit 1; fi ;;
   tout|all|"*")
     if liste_release; then mapfile -t items <<< "$LISTE_RELEASE"
@@ -116,12 +147,14 @@ for it in "${items[@]}"; do
   d="in/$(printf '%02d' "$n")"; mkdir -p "$d"
   echo "::group::Source $n : $it"
   ok=1
+  id_attente=""
   if [[ "$it" == http* ]]; then
     par_lien "$it" "$d" || ok=0
   else
     if liste_release; then
       nom="$(trouver_nom "$it")"
-      if [ -n "$nom" ]; then depuis_release "$nom" "$d" || ok=0
+      if [ -n "$nom" ]; then
+        if depuis_release "$nom" "$d"; then id_attente="$(id_de "$nom")"; else ok=0; fi
       else warn "« $it » introuvable dans la Release 'videos'. Présents : $(printf '%s\n' "$LISTE_RELEASE" | paste -sd ',' | sed 's/,/, /g')"; ok=0; fi
     else ok=0; fi
   fi
@@ -129,6 +162,7 @@ for it in "${items[@]}"; do
   if [ "$ok" = 1 ] && [ -n "$f" ] && est_media "$f"; then
     titre="$(basename "${f%.*}" | tr '._' '  ' | sed 's/  */ /g')"
     printf '%s\t%s\n' "$f" "$titre" >> in/sources.tsv
+    [ -n "$id_attente" ] && echo "$id_attente" >> in/ids_release.txt
     ls -lh "$f"
   else
     warn "Source $n ignorée (téléchargement impossible ou pas d'audio) : $it"

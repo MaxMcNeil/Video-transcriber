@@ -19,7 +19,9 @@ Transcription 100 % locale d'une ou plusieurs vidéos/audios (2 min à plusieurs
 ### 2. Fichier vidéo, ou lien non YouTube (Drive, X, Telegram…) → depuis GitHub
 1. (Pour un fichier) **Releases → videos → Edit** → ajoute le fichier → **Update release**.
 2. **Actions → Transcribe → Run workflow**.
-3. Champ **source** : laisse **vide** (= dernière vidéo déposée), ou écris **`tout`**, ou colle le lien. Plusieurs : sépare par **`;`**.
+3. Champ **source** : laisse **VIDE**. Le workflow prend tout seul **toutes les vidéos nouvelles** de la Release (jamais transcrites), ensemble dans un seul texte. S'il n'y a rien de nouveau, il reprend le **dernier lot déposé**.
+   - Pour un lien non YouTube : colle-le dans source (plusieurs : sépare par **`;`**).
+   - `tout` = toute la Release, même déjà transcrite.
 4. Laisse les autres champs tels quels → **Run workflow**.
 
 ### 3. Récupérer le résultat (≈ 30 min à 2 h selon la durée)
@@ -39,7 +41,7 @@ Actions → **Transcribe** → Run workflow :
 
 | Champ | Valeurs |
 |---|---|
-| `source` | vide = dernière vidéo de la Release **videos** · `tout` = toute la Release · ou une liste séparée par `;` de liens (YouTube, Drive, X, Telegram, lien direct…) et/ou de noms de fichiers de la Release |
+| `source` | vide = toutes les vidéos **nouvelles** de la Release **videos** (sinon le dernier lot) · `tout` = toute la Release · ou une liste séparée par `;` de liens (YouTube, Drive, X, Telegram, lien direct…) et/ou de noms de fichiers de la Release |
 | `prompteur` | `auto` (langue des sources) · `fr` · `ar` · `it` · `en` · `non` |
 | `duree_prompteur` | `auto` · `court` (~3 min) · `moyen` (~7 min) · `long` (~13 min) |
 | `ia` | `qwen3-8b` (défaut) · `mistral-nemo-12b` — l'autre sert de secours automatique |
