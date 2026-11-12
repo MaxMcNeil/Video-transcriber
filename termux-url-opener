@@ -8,8 +8,13 @@ termux-wake-lock 2>/dev/null || true
 
 # mises à jour automatiques (script de lancement + ce script pour la prochaine fois)
 curl -fsSL -o ~/yt2release.sh.new "$RAW/yt2release.sh" && mv ~/yt2release.sh.new ~/yt2release.sh || true
-curl -fsSL -o ~/bin/termux-url-opener.new "$RAW/termux-url-opener" \
-  && chmod +x ~/bin/termux-url-opener.new && mv ~/bin/termux-url-opener.new ~/bin/termux-url-opener || true
+if [ -z "${YT2R_MAJ:-}" ] && curl -fsSL -o ~/bin/termux-url-opener.new "$RAW/termux-url-opener"; then
+  if ! cmp -s ~/bin/termux-url-opener.new ~/bin/termux-url-opener; then
+    chmod +x ~/bin/termux-url-opener.new && mv ~/bin/termux-url-opener.new ~/bin/termux-url-opener
+    YT2R_MAJ=1 exec bash ~/bin/termux-url-opener "$@"     # relance tout de suite la nouvelle version
+  fi
+  rm -f ~/bin/termux-url-opener.new
+fi
 
 lien="$1"
 touch "$FILE"
