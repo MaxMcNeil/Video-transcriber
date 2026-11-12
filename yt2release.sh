@@ -39,6 +39,29 @@ gh auth status >/dev/null 2>&1 || gh auth login
 gh release view videos -R "$REPO" >/dev/null 2>&1 || \
   gh release create videos -R "$REPO" -t "Vidéos à transcrire" -n "Dépose ici les vidéos à transcrire."
 
+# Le fichier est-il déjà en ligne, complet (même taille) ?
+deja_en_ligne() {   # $1 = nom, $2 = taille locale
+  local t
+  t="$(gh api "repos/$REPO/releases/tags/videos" \
+       -q ".assets[] | select(.name == \"$1\" and .state == \"uploaded\") | .size" 2>/dev/null | head -n1)"
+  [ -n "$t" ] && [ "$t" = "$2" ]
+}
+
+# Envoi robuste : 3 essais ; une coupure après un envoi réussi
+# (« already exists ») n'est pas un échec si le fichier en ligne est complet.
+envoyer() {   # $1 = fichier, $2 = nom
+  local taille essai
+  taille="$(stat -c %s "$1")"
+  for essai in 1 2 3; do
+    if deja_en_ligne "$2" "$taille"; then echo "✅ Déjà en ligne : $2"; return 0; fi
+    gh release upload videos "$1" -R "$REPO" --clobber && return 0
+    sleep 10
+    if deja_en_ligne "$2" "$taille"; then echo "✅ Envoi confirmé : $2"; return 0; fi
+    echo "Nouvel essai d'envoi ($essai/3)…"
+  done
+  return 1
+}
+
 TMP="$HOME/.yt2release"
 noms=()
 n=0
@@ -56,10 +79,10 @@ for URL in "$@"; do
   [ -n "$f" ] || { echo "⚠️  Aucun fichier pour ce lien."; continue; }
   nom="$(basename "$f")"
   echo "Envoi dans la Release 'videos' : $nom ($(du -h "$f" | cut -f1))"
-  if gh release upload videos "$f" -R "$REPO" --clobber; then
+  if envoyer "$f" "$nom"; then
     noms+=("$nom")
   else
-    echo "⚠️  Envoi impossible pour $nom."
+    echo "⚠️  Envoi impossible pour $nom (vérifie ta connexion)."
   fi
 done
 rm -rf "$TMP"
