@@ -26,8 +26,7 @@ while IFS= read -r l; do
   n=$((n + 1)); echo "  $n. $l"
 done < "$FILE"
 echo
-echo "  Entrée       = LANCER ces $nb vidéo(s) ensemble (prompteur dans la langue des vidéos)"
-echo "  ar + Entrée  = LANCER avec le prompteur en ARABE   (fr / it / en : idem)"
+echo "  Entrée       = J'AI FINI : lancer ces $nb vidéo(s) ensemble"
 echo "  a  + Entrée  = attendre : partage la vidéo suivante"
 echo "  x  + Entrée  = vider la liste et ne rien lancer"
 echo
@@ -46,9 +45,23 @@ case "$choix" in
     echo "🗑️  Liste vidée, rien n'a été lancé."
     sleep 3; exit 0 ;;
 esac
+# Langue du texte prompteur : toujours demandée au lancement (sauf si déjà tapée)
+while [ "$langue" = auto ]; do
+  echo
+  echo "🌍 Langue du texte prompteur ?"
+  echo "   ar = arabe   fr = français   it = italien   en = anglais"
+  echo "   (Entrée seule = langue majoritaire des vidéos)"
+  read -r -t 60 rep || rep=""
+  rep="$(printf '%s' "$rep" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')"
+  case "$rep" in
+    ar|fr|it|en) langue="$rep" ;;
+    "") break ;;
+    *) echo "❓ Tape ar, fr, it ou en." ;;
+  esac
+done
 mapfile -t liens < <(sed '/^$/d' "$FILE")
 rm -f "$FILE"
-[ "$langue" != auto ] && echo "Prompteur en : $langue"
+echo "Prompteur en : $langue"
 PROMPTEUR="$langue" bash ~/yt2release.sh "${liens[@]}"
 echo
 echo "Tu peux fermer Termux (le traitement continue sur GitHub)."
