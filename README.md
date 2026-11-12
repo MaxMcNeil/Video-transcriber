@@ -2,6 +2,38 @@
 
 Transcription 100 % locale d'une ou plusieurs vidéos/audios (2 min à plusieurs heures), puis **texte prompteur prêt à lire face caméra** écrit par une IA locale. Aucune API, aucun service payant : tout tourne sur le runner GitHub.
 
+---
+
+## ▶️ COMMENT LANCER (mode d'emploi)
+
+### 1. Vidéo YouTube → depuis le téléphone
+1. Dans l'appli **YouTube**, ouvre la vidéo → **Partager** → **Termux**.
+2. Appuie sur **Entrée** (ou attends 15 secondes).
+   - Plusieurs vidéos à mélanger dans un seul texte : tape **`a`** puis Entrée, et partage la vidéo suivante. La dernière, valide avec Entrée.
+3. Quand Termux affiche **✅ Transcription lancée**, tu peux fermer Termux.
+
+> ⚠️ Ne mets **pas** de lien YouTube dans le formulaire GitHub : YouTube bloque les serveurs GitHub.
+> Installation à refaire uniquement sur un nouveau téléphone ou après réinstallation de Termux :
+> `curl -fsSL https://raw.githubusercontent.com/MaxMcNeil/Video-transcriber/main/termux-setup.sh | bash`
+
+### 2. Fichier vidéo, ou lien non YouTube (Drive, X, Telegram…) → depuis GitHub
+1. (Pour un fichier) **Releases → videos → Edit** → ajoute le fichier → **Update release**.
+2. **Actions → Transcribe → Run workflow**.
+3. Champ **source** : laisse **vide** (= dernière vidéo déposée), ou écris **`tout`**, ou colle le lien. Plusieurs : sépare par **`;`**.
+4. Laisse les autres champs tels quels → **Run workflow**.
+
+### 3. Récupérer le résultat (≈ 30 min à 2 h selon la durée)
+**Releases → transcriptions**, fichiers commençant par la date et l'heure :
+- **`…_prompteur.txt`** → à coller dans le prompteur
+- `…_fiche.txt` → les faits utilisés (à vérifier avant le live)
+- `…_transcription.txt` → tout ce qui a été dit
+
+### 4. Si le run est rouge
+- Rouge **sans aucune étape** (« startup failure ») → ouvre le run → **Re-run all jobs**.
+- Rouge sur une étape → envoie-moi la capture ou le lien du run.
+
+---
+
 ## Utilisation
 Actions → **Transcribe** → Run workflow :
 
