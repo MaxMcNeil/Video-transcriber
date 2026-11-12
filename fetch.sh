@@ -29,7 +29,7 @@ liste_release() {
     fi
     # id<TAB>nom<TAB>date, ordre de dépôt (du plus ancien au plus récent) ; « _… » = fichiers internes
     ASSETS_TSV="$(gh api "repos/$REPO/releases/tags/videos" \
-      -q '.assets | map(select(.name | startswith("_") | not)) | sort_by(.created_at) | .[]
+      -q '.assets | map(select(.name | startswith("_videos_deja") | not)) | sort_by(.created_at) | .[]
           | "\(.id)\t\(.name)\t\(.created_at)"')"
     LISTE_RELEASE="$(printf '%s\n' "$ASSETS_TSV" | cut -f2 | sed '/^$/d')"
   fi
@@ -60,7 +60,7 @@ selection_auto() {
   fi
   echo "Source vide : aucune nouvelle vidéo → reprise du dernier lot déposé." >&2
   gh api "repos/$REPO/releases/tags/videos" \
-    -q '.assets | map(select(.name | startswith("_") | not)) | sort_by(.created_at)
+    -q '.assets | map(select(.name | startswith("_videos_deja") | not)) | sort_by(.created_at)
         | (map(.created_at | fromdateiso8601) | max) as $t
         | map(select((.created_at | fromdateiso8601) >= $t - 1800)) | .[].name'
 }
