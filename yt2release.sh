@@ -48,7 +48,7 @@ for URL in "$@"; do
   echo "[$n/$#] Téléchargement de l'audio : $URL"
   if ! yt-dlp --js-runtimes node --no-playlist --restrict-filenames \
        -f "bestaudio[ext=m4a]/bestaudio/best" --retries 10 \
-       -o "$TMP/%(title).60B-%(id)s.%(ext)s" "$URL"; then
+       -o "$TMP/yt-%(title).50B-%(id)s.%(ext)s" "$URL"; then
     echo "⚠️  Échec pour ce lien, je passe au suivant."
     continue
   fi
