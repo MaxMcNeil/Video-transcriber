@@ -48,5 +48,9 @@
         "repeat_penalty": 1.05
       }
     }
-  }
+  },
+  "langues_pivot": [
+    "ar"
+  ],
+  "_note_langues_pivot": "Pour ces langues, l'IA prépare la fiche et écrit le texte en anglais (sa langue la plus forte), puis le traduit à la fin."
 }

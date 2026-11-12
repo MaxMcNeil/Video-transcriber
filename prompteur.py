@@ -570,7 +570,68 @@ Réponds UNIQUEMENT par son numéro.
     c = banque[choix - 1]
     texte, auteur = c[langue if langue in c else "fr"]
     log(f"Citation d'ouverture : « {texte} » — {auteur}")
-    return texte, auteur, [c[k][0] for k in ("fr", "ar", "it", "en")]
+    return texte, auteur, [c[k][0] for k in ("fr", "ar", "it", "en")], {k: tuple(c[k]) for k in ("fr", "ar", "it", "en")}
+
+
+SYS_TRAD = ("Tu es traducteur-adaptateur professionnel pour la télévision d'information. Tu traduis fidèlement "
+            "et naturellement, pour un texte lu à voix haute face caméra.")
+
+
+def prompt_traduction(paras, langue, strict=False):
+    num = "\n\n".join(f"[[{i}]] {p}" for i, p in enumerate(paras, 1))
+    rappel = ("\n- IMPORTANT : AUCUN mot en lettres latines dans la traduction, tous les noms en écriture arabe."
+              if strict and langue == "ar" else "")
+    return f"""Traduis ces paragraphes d'un texte de prompteur (lu face caméra en live) en {LANGUE[langue]}.
+- Registre oral de présentateur d'information, vivant ; garde le ton (alarme, ironie, humour noir), les phrases courtes et le rythme.
+- Traduction fidèle : n'ajoute et ne retire aucun fait, nom, chiffre ou date.
+{consigne_langue(langue)}{rappel}
+- Garde EXACTEMENT la numérotation [[n]] devant chaque paragraphe : un paragraphe traduit par numéro, rien d'autre, aucun commentaire.
+
+{num}"""
+
+
+def _latin(t):
+    return bool(re.search(r"[A-Za-z]{3,}", t))
+
+
+def traduire_texte(srv, conf, texte, langue):
+    """Traduit le texte final paragraphe par paragraphe (structure conservée, contrôle de chaque paragraphe)."""
+    paras = [p for p in texte.strip().split("\n\n") if p.strip()]
+    sortie = [None] * len(paras)
+    lots = [list(range(i, min(i + 6, len(paras)))) for i in range(0, len(paras), 6)]
+    for k, lot in enumerate(lots, 1):
+        log(f"Traduction vers {LANGUE[langue].split(' (')[0]} ({k}/{len(lots)})…")
+        bloc = [paras[i] for i in lot]
+        maxi = min(3000, tokens_estimes("\n".join(bloc), "fr") * 3 + 200)
+        try:
+            r, _ = srv.chat(SYS_TRAD, [{"role": "user", "content": prompt_traduction(bloc, langue)}], maxi, conf["extraction"])
+            morceaux = re.split(r"\[\[(\d+)\]\]", r)
+            for j in range(1, len(morceaux) - 1, 2):
+                n = int(morceaux[j])
+                if 1 <= n <= len(lot) and morceaux[j + 1].strip():
+                    sortie[lot[n - 1]] = morceaux[j + 1].strip()
+        except Exception as e:
+            avertir(f"Traduction du lot {k} : {e}")
+    # paragraphes manquants ou encore en lettres latines (arabe) : un par un, consigne stricte
+    for i, p in enumerate(paras):
+        if sortie[i] is None or (langue == "ar" and _latin(sortie[i])):
+            for _ in range(2):
+                try:
+                    r, _f = srv.chat(SYS_TRAD, [{"role": "user", "content": prompt_traduction([p], langue, strict=True)}],
+                                     min(1500, tokens_estimes(p, "fr") * 3 + 150), conf["extraction"])
+                    t = re.sub(r"^\s*\[\[\d+\]\]\s*", "", r).strip()
+                    if t and not REFUS.search(t[:200]):
+                        sortie[i] = t
+                        if not (langue == "ar" and _latin(t)):
+                            break
+                except Exception as e:
+                    avertir(f"Traduction du paragraphe {i + 1} : {e}")
+            if sortie[i] is None:
+                avertir(f"Paragraphe {i + 1} non traduit : retiré.")
+    restes = sum(1 for t in sortie if t and langue == "ar" and _latin(t))
+    if restes:
+        avertir(f"{restes} paragraphe(s) contiennent encore des lettres latines.")
+    return "\n\n".join(t for t in sortie if t) + "\n"
 
 
 def ecrire(srv, conf, fiche, meta, langue, mots, chaine, citation=None):
@@ -642,6 +703,11 @@ def main():
     if a.duree not in LONGUEURS:
         mots = min(mots, max(150, total_mots))      # jamais plus long que la matière
     chaine = config["chaines"].get(langue, "")
+    # Langue de TRAVAIL de l'IA : anglais pour les langues qu'elle écrit mal (fiche + texte),
+    # puis traduction finale ; doit être identique dans tous les jobs (fiches en parallèle).
+    travail = "en" if langue in config.get("langues_pivot", ["ar"]) else langue
+    if travail != langue:
+        log(f"L'IA travaille en anglais, puis traduit le texte final en {LANGUE[langue].split(' (')[0]}.")
 
     if a.etape == "compter":                          # nb de fiches pour cette part
         print(sum(1 for g, *_ in lister_morceaux(meta) if g % a.parts == a.part))
@@ -659,7 +725,7 @@ def main():
                 conf = config["ia"][nom_ia]
                 srv = Serveur(telecharger_modele(conf), conf)
                 srv.demarrer()
-                extraire_fiches(srv, conf, meta, langue, a.work, a.part, a.parts)
+                extraire_fiches(srv, conf, meta, travail, a.work, a.part, a.parts)
                 return
             except Exception as e:
                 avertir(f"Fiches avec {nom_ia} : {e}")
@@ -696,7 +762,16 @@ def main():
         log(f"Texte prompteur écrit : {sortie} — {n} mots ≈ {max(1, round(n / 150))} min de lecture "
             f"({LANGUE[langue].split(' (')[0]}, IA {nom_ia}){note}")
 
-    fiche, citation, meilleur, dernier_err = None, None, ("", ""), None
+    def vers_langue(srv, conf, texte):
+        """Texte écrit dans la langue de travail -> langue demandée (+ version anglaise en bonus)."""
+        if travail == langue:
+            return texte
+        version = os.path.join(a.out, f"{meta['prefixe']}_prompteur.{travail}.txt")
+        with open(version, "w", encoding="utf-8") as f:
+            f.write((f"“{cit_travail[0]}”\n— {cit_travail[1]}\n\n" if cit_travail else "") + texte)
+        return dedoublonner(nettoyer(traduire_texte(srv, conf, texte, langue)))
+
+    fiche, citation, cit_travail, meilleur, dernier_err = None, None, None, ("", ""), None
     for nom_ia in ordre[:2]:
         conf = config["ia"][nom_ia]
         srv = None
@@ -705,13 +780,14 @@ def main():
             srv = Serveur(telecharger_modele(conf), conf)
             srv.demarrer()
             if fiche is None:
-                fiche = preparer_fiche(srv, conf, meta, langue, a.work)   # calculée une seule fois
+                fiche = preparer_fiche(srv, conf, meta, travail, a.work)   # calculée une seule fois
                 citation = choisir_citation(srv, conf, fiche, langue, meta["prefixe"])
+                cit_travail = (citation[3][travail] + (citation[2],)) if citation else None
             for essai in range(2):
                 if essai and reste_min() < 25:
                     avertir("Temps insuffisant pour un nouvel essai.")
                     break
-                brut = ecrire(srv, conf, fiche, meta, langue, mots, chaine, citation)
+                brut = ecrire(srv, conf, fiche, meta, travail, mots, chaine, cit_travail)
                 if REFUS.search(brut[:400]):
                     avertir(f"{nom_ia} a refusé d'écrire (essai {essai + 1}).")
                     continue
@@ -720,7 +796,7 @@ def main():
                 if n > compter_mots(meilleur[0]):
                     meilleur = (texte, nom_ia)
                 if n >= mots * 0.35:
-                    publier(texte, nom_ia)
+                    publier(vers_langue(srv, conf, texte), nom_ia)
                     return
                 avertir(f"Texte trop court ({n} mots pour ~{mots}).")
             dernier_err = RuntimeError(f"{nom_ia} n'a pas produit de texte satisfaisant")
@@ -736,7 +812,24 @@ def main():
         if nom_ia != ordre[1]:
             log("Bascule sur l'autre IA locale.")
     if meilleur[0].strip():
-        publier(meilleur[0], meilleur[1], " — plus court que prévu")
+        texte = meilleur[0]
+        if travail != langue:                          # traduire aussi le texte de secours
+            conf = config["ia"][meilleur[1]]
+            srv = None
+            try:
+                srv = Serveur(telecharger_modele(conf), conf)
+                srv.demarrer()
+                texte = vers_langue(srv, conf, texte)
+            except Exception as e:
+                print(f"::error::Traduction du texte de secours impossible ({e}) : seule la version anglaise est publiée.")
+                version = os.path.join(a.out, f"{meta['prefixe']}_prompteur.{travail}.txt")
+                with open(version, "w", encoding="utf-8") as f:
+                    f.write(texte)
+                sys.exit(1)
+            finally:
+                if srv:
+                    srv.arreter()
+        publier(texte, meilleur[1], " — plus court que prévu")
         avertir("Texte prompteur publié mais plus court que la longueur visée.")
         return
     print(f"::error::Texte prompteur impossible : {dernier_err}. La transcription reste disponible.")

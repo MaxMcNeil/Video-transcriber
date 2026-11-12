@@ -77,7 +77,8 @@ Le résumé du run affiche le début du prompteur et de la transcription.
 - Structure rétention : citation → **hook ultra-choc** → promesse → blocs avec relances et **décryptage stratégique** (qui gagne, qui perd, rapports de force) → appel à liker → **scénario de la suite** (présenté comme une analyse) → chute + abonnement.
 - Ton : **alarme et indignation** + **stratège géopolitique** + **humour noir** en contrepoint ; phrases courtes, aucune autocensure ; aucun fait inventé.
 - Texte brut : pas de titres, pas de markdown, un paragraphe par idée.
-- Nom de la chaîne cité dans l'appel à l'abonnement selon la langue : modifiable dans `config.json`.
+- Nom de la chaîne cité dans l'appel à l'abonnement selon la langue : modifiable dans `config.json` (ajouté automatiquement si l'IA l'oublie).
+- **Arabe** : l'IA prépare la fiche et écrit le texte **en anglais** (sa langue la plus forte), puis le **traduit en arabe standard** paragraphe par paragraphe (noms en écriture arabe, contrôle automatique). La version anglaise est aussi publiée (`…_prompteur.en.txt`). Liste des langues concernées : `langues_pivot` dans `config.json`.
 
 ## Fiabilité
 - Une source qui échoue n'arrête pas les autres ; la liste des échecs apparaît dans le résumé.
