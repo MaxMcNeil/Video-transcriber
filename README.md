@@ -8,9 +8,13 @@ Transcription 100 % locale d'une ou plusieurs vidéos/audios (2 min à plusieurs
 
 ### 1. Vidéo YouTube → depuis le téléphone
 1. Dans l'appli **YouTube**, ouvre la vidéo → **Partager** → **Termux**.
-2. Appuie sur **Entrée** (ou attends 15 secondes).
-   - Plusieurs vidéos à mélanger dans un seul texte : tape **`a`** puis Entrée, et partage la vidéo suivante. La dernière, valide avec Entrée.
+2. Termux affiche la **liste des vidéos en attente**, puis :
+   - **Entrée** (ou 20 secondes sans rien faire) → lance la transcription de toute la liste ;
+   - **`a`** → garde la vidéo et attend la suivante : retourne sur YouTube et partage la vidéo suivante ;
+   - **`x`** → vide la liste sans rien lancer.
 3. Quand Termux affiche **✅ Transcription lancée**, tu peux fermer Termux.
+
+> 💡 **Chaque partage ouvre une NOUVELLE fenêtre Termux : c'est normal.** Les vidéos partagées avant ne sont pas perdues, la nouvelle fenêtre les affiche toutes dans la liste.
 
 > ⚠️ Ne mets **pas** de lien YouTube dans le formulaire GitHub : YouTube bloque les serveurs GitHub.
 > Installation à refaire uniquement sur un nouveau téléphone ou après réinstallation de Termux :
@@ -82,8 +86,9 @@ YouTube refuse souvent les serveurs GitHub (« confirm you're not a bot »). Sol
    curl -fsSL https://raw.githubusercontent.com/MaxMcNeil/Video-transcriber/main/termux-setup.sh | bash
    ```
    Ensuite, dans YouTube : **Partager → Termux**. C'est tout.
-   - Entrée (ou 15 s) : lance la transcription.
-   - `a` : garde le lien en attente ; le partage suivant lance tous les liens ensemble (un seul texte prompteur).
+   - Entrée (ou 20 s) : lance la transcription de toute la liste affichée.
+   - `a` : garde le lien en attente ; chaque partage ouvre une nouvelle fenêtre qui montre toute la liste.
+   - `x` : vide la liste.
    - Termux reste actif écran éteint (wake-lock), et le script se met à jour tout seul à chaque partage.
    - Raccourci clavier possible : `yt LIEN1 LIEN2` (options : `PROMPTEUR=ar DUREE=court yt LIEN`).
 2. Dépose toi-même la vidéo dans la Release **videos** et lance avec `source` vide.

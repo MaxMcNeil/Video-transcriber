@@ -15,6 +15,13 @@ if command -v termux-wake-lock >/dev/null; then
   trap 'termux-wake-unlock 2>/dev/null' EXIT
 fi
 REPO="MaxMcNeil/Video-transcriber"
+# tient aussi à jour le script de partage Android (installé par termux-setup.sh)
+if [ -d "$HOME/bin" ]; then
+  curl -fsSL -o "$HOME/bin/termux-url-opener.new" \
+    "https://raw.githubusercontent.com/$REPO/main/termux-url-opener" 2>/dev/null \
+    && chmod +x "$HOME/bin/termux-url-opener.new" \
+    && mv "$HOME/bin/termux-url-opener.new" "$HOME/bin/termux-url-opener" || rm -f "$HOME/bin/termux-url-opener.new"
+fi
 PROMPTEUR="${PROMPTEUR:-auto}"
 DUREE="${DUREE:-auto}"
 [ $# -gt 0 ] || { echo "Usage : bash yt2release.sh LIEN [LIEN2 …]"; exit 1; }
