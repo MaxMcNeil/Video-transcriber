@@ -132,26 +132,26 @@ jobs:
           python prompteur.py --langue "$LANGUE" --duree "$DUREE" --ia "$IA"
 
       - name: Artefact
-        if: always() && hashFiles('out/*_prompteur.txt', 'out/*_fiche.txt') != ''
+        if: always() && hashFiles('out/*_prompteur*.txt', 'out/*_fiche.txt') != ''
         uses: actions/upload-artifact@v4
         with:
           name: prompteur
           path: |
-            out/*_prompteur.txt
+            out/*_prompteur*.txt
             out/*_fiche.txt
 
       - name: Publier dans la Release 'transcriptions'
-        if: always() && hashFiles('out/*_prompteur.txt', 'out/*_fiche.txt') != ''
+        if: always() && hashFiles('out/*_prompteur*.txt', 'out/*_fiche.txt') != ''
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release view transcriptions >/dev/null 2>&1 || \
             gh release create transcriptions -t "Transcriptions" -n "Transcriptions et textes prompteur"
           shopt -s nullglob
-          gh release upload transcriptions out/*_prompteur.txt out/*_fiche.txt --clobber
+          gh release upload transcriptions out/*_prompteur*.txt out/*_fiche.txt --clobber
           {
             echo "## Texte prompteur (Release **transcriptions**)"
-            for f in out/*_prompteur.txt out/*_fiche.txt; do echo "- \`$(basename "$f")\`"; done
+            for f in out/*_prompteur*.txt out/*_fiche.txt; do echo "- \`$(basename "$f")\`"; done
             p=$(ls out/*_prompteur.txt 2>/dev/null | head -n1)
             if [ -n "$p" ]; then
               echo; echo "### Début du texte prompteur"; echo '```'; head -c 2500 "$p"; echo; echo '```'

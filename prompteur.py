@@ -282,7 +282,8 @@ FICHES :
 def consigne_langue(langue):
     if langue == "ar":
         return ("- LANGUE : arabe standard moderne (فصحى) UNIQUEMENT, sans aucun mot de dialecte. Tous les noms propres "
-                "en écriture arabe, jamais en lettres latines (محمد بن سلمان, السعودية, ماكغريغور…).")
+                "en écriture arabe, jamais en lettres latines (محمد بن سلمان, السعودية, ماكغريغور…). "
+                "S'adresser au public TOUJOURS au pluriel (أنتم، تعلمون، اشتركوا), jamais au singulier ni au féminin.")
     return (f"- LANGUE : {LANGUE[langue]} uniquement ; les noms propres dans l'écriture et l'orthographe usuelles "
             f"de cette langue.")
 
