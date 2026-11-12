@@ -28,60 +28,40 @@ on:
         options: [non, fr, it, en, ar]
         default: non
       model:
-        description: "Modèle de transcription (auto = le plus précis possible selon la durée)"
+        description: "Modèle de transcription (auto = large-v3, le plus précis, sur chaque tranche)"
         type: choice
-        options: [auto, small, large-v3-turbo, large-v3]
+        options: [auto, large-v3, large-v3-turbo, small]
         default: auto
 
 permissions:
   contents: write
 
 jobs:
-  transcribe:
+  # 1) Récupère les sources et les découpe en tranches de ~25 min (coupées sur des silences)
+  recuperer:
     runs-on: ubuntu-latest
-    timeout-minutes: 350
-    env:
-      PIP_DISABLE_PIP_VERSION_CHECK: "1"
-      HF_HUB_DISABLE_PROGRESS_BARS: "1"
-      PYTHONUNBUFFERED: "1"
+    timeout-minutes: 90
+    outputs:
+      ids: ${{ steps.plan.outputs.ids }}
     steps:
-      - name: Préparer
-        run: |
-          echo "JOB_START=$(date +%s)" >> "$GITHUB_ENV"
-          # libère ~20 Go (modèles IA volumineux)
-          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL &
-          df -h / | tail -n1
-
       - uses: actions/checkout@v5
 
       - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
-          cache: pip
 
-      - name: Installer ffmpeg
+      - name: Installer ffmpeg et le téléchargement
         run: |
           if ! command -v ffmpeg >/dev/null; then
             sudo apt-get update -qq
             sudo apt-get install -y -qq ffmpeg >/dev/null
           fi
-          ffmpeg -version | head -n1
-
-      - name: Installer transcription et téléchargement
-        run: |
-          pip install -q -r requirements.txt
           pip install -q -U "yt-dlp[default]"
 
       - name: Installer Deno (requis par yt-dlp pour YouTube)
         uses: denoland/setup-deno@v2
         with:
           deno-version: v2.x
-
-      - name: Installer la traduction (si demandée)
-        if: inputs.translate != 'non'
-        run: |
-          pip install -q torch --index-url https://download.pytorch.org/whl/cpu
-          pip install -q argostranslate
 
       - name: Récupérer les sources
         env:
@@ -93,23 +73,112 @@ jobs:
           bash fetch.sh "$SRC"
           rm -f cookies.txt
 
-      - name: Choisir le modèle de transcription
-        id: choix
-        env:
-          MODEL: ${{ inputs.model }}
-        run: echo "modele=$(python transcribe.py --model "$MODEL" --choisir)" >> "$GITHUB_OUTPUT"
+      - name: Découper en tranches
+        id: plan
+        run: python transcribe.py --etape plan
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: decoupe
+          path: |
+            work/plan.json
+            segments/
+            in/sources.tsv
+            in/ids_release.txt
+            in/echecs.txt
+          if-no-files-found: error
+          retention-days: 7
+
+  # 2) Chaque tranche sur son propre serveur, avec le modèle le plus précis
+  transcrire:
+    needs: recuperer
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      max-parallel: 20
+      matrix:
+        id: ${{ fromJSON(needs.recuperer.outputs.ids) }}
+    env:
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+      HF_HUB_DISABLE_PROGRESS_BARS: "1"
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - run: pip install -q -r requirements.txt
 
       - name: Cache du modèle de transcription
         uses: actions/cache@v4
         with:
           path: ~/.cache/huggingface/hub/models--*whisper*
-          key: whisper-v1-${{ steps.choix.outputs.modele }}
+          key: whisper-v2-${{ inputs.model }}
 
-      - name: Transcrire
+      - uses: actions/download-artifact@v4
+        with:
+          name: decoupe
+          path: .
+
+      - name: Transcrire la tranche ${{ matrix.id }}
         env:
-          MODEL: ${{ steps.choix.outputs.modele }}
+          MODEL: ${{ inputs.model }}
+          ID: ${{ matrix.id }}
+        run: python transcribe.py --etape segment --id "$ID" --model "$MODEL"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: seg-${{ matrix.id }}
+          path: work/segs/
+          retention-days: 7
+
+  # 3) Recolle les tranches, publie la transcription (tout de suite, sans attendre le prompteur)
+  assembler:
+    needs: [recuperer, transcrire]
+    if: always() && needs.recuperer.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Installer la traduction (si demandée)
+        if: inputs.translate != 'non'
+        run: |
+          pip install -q torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -q argostranslate
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: decoupe
+          path: .
+
+      - name: Récupérer les tranches transcrites
+        continue-on-error: true        # une tranche manquante est signalée dans le texte
+        uses: actions/download-artifact@v4
+        with:
+          pattern: seg-*
+          path: work/segs
+          merge-multiple: true
+
+      - name: Assembler
+        env:
           TRAD: ${{ inputs.translate }}
-        run: python transcribe.py --model "$MODEL" --translate "$TRAD"
+        run: |
+          mkdir -p work/segs
+          echo "Tranches transcrites : $(ls work/segs | wc -l)"
+          python transcribe.py --etape assembler --translate "$TRAD"
 
       - name: Garder le travail pour l'écriture du prompteur
         if: always() && hashFiles('work/meta.json') != ''
@@ -117,18 +186,10 @@ jobs:
         with:
           name: travail
           path: |
-            work/
+            work/meta.json
+            work/source_*.json
             out/
           retention-days: 7
-
-      # Les étapes suivantes tournent même en cas d'échec ou de coupure,
-      # pour toujours récupérer ce qui a été produit.
-      - name: Artefact
-        if: always() && hashFiles('out/*.txt') != ''
-        uses: actions/upload-artifact@v4
-        with:
-          name: transcription
-          path: out/
 
       - name: Publier dans la Release 'transcriptions'
         if: always() && hashFiles('out/*.txt') != ''
@@ -146,22 +207,22 @@ jobs:
             gh release upload transcriptions _videos_deja_traitees.txt --clobber
           fi
           {
-            echo "## Résultats (Release **transcriptions**)"
+            echo "## Transcription (Release **transcriptions**)"
             for f in out/*.txt out/*.srt; do echo "- \`$(basename "$f")\`"; done
             if [ -s in/echecs.txt ]; then
               echo; echo "### ⚠️ Sources non récupérées"
               sed 's/^/- /' in/echecs.txt
             fi
-            echo; echo "_Le texte prompteur est écrit ensuite par le job « prompteur » (fiches en parallèle)._"
+            echo; echo "_Le texte prompteur est écrit ensuite par le job « prompteur »._"
             t=$(ls out/*_transcription.txt 2>/dev/null | head -n1)
             if [ -n "$t" ]; then
               echo; echo "### Début de la transcription"; echo '```'; head -c 1000 "$t"; echo; echo '```'
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
-  # Texte prompteur : fiches réparties sur 4 serveurs en parallèle, puis écriture
+  # 4) Texte prompteur : fiches réparties sur 4 serveurs en parallèle, puis écriture
   prompteur:
-    needs: transcribe
+    needs: assembler
     if: inputs.prompteur != 'non'
     uses: ./.github/workflows/prompteur-commun.yml
     with:

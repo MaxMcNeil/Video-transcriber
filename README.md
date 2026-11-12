@@ -84,7 +84,7 @@ Le résumé du run affiche le début du prompteur et de la transcription.
 - Transcription écrite au fil de l'eau et **publiée même si une étape suivante échoue** ou si le job est coupé.
 - Filtres anti-hallucinations Whisper (« Amara.org », « ♪ », boucles).
 - IA : si l'une refuse ou échoue, bascule automatique sur l'autre. Moteur llama.cpp officiel, avec compilation de secours.
-- Modèle de transcription adapté à la durée totale : `large-v3` ≤ 40 min, `large-v3-turbo` ≤ 2 h 30, `small` au-delà.
+- Transcription : chaque vidéo est découpée en tranches d'environ 25 min (coupées sur des silences), transcrites **en parallèle** sur des serveurs séparés avec le modèle le plus précis (`large-v3`), puis recollées. Une tranche en échec est signalée dans le texte sans bloquer le reste.
 
 ## YouTube bloqué ?
 YouTube refuse souvent les serveurs GitHub (« confirm you're not a bot »). Solutions :

@@ -199,6 +199,10 @@ Rédige en {LANGUE[langue]} la FICHE DE PRÉPARATION d'une chronique, avec exact
 {RUBRIQUES}
 
 Puces courtes, 35 puces au maximum en tout, l'essentiel d'abord. N'invente rien, ne commente pas.
+QUALITÉ : écarte tout passage incompréhensible ou mal reconnu ; ne recopie JAMAIS une phrase qui n'a pas de sens.
+Un nom propre déformé dont tu n'es pas sûr : omets-le plutôt que de le recopier.
+ÉPOQUES : si la transcription parle de faits historiques (règnes, guerres, événements passés), indique l'époque ou
+l'année entre parenthèses et ne les présente jamais comme actuels.
 Rubrique sans contenu : écris « — ». Si la transcription ne contient rien d'utile, réponds seulement : RIEN
 
 TRANSCRIPTION :
@@ -267,11 +271,28 @@ def prompt_fusion(fiches, langue):
 Fusionne-les en UNE seule fiche cohérente, en {LANGUE[langue]}, avec exactement ces rubriques :
 {RUBRIQUES}
 
-Un seul ANGLE (le plus fort de tous). Supprime les doublons, regroupe par sujet, garde tous les noms,
-chiffres, citations et soupçons importants. 40 puces au maximum. N'invente rien. Pas de commentaire.
+Un seul ANGLE (le plus fort de tous, et d'actualité). Supprime les doublons, regroupe par sujet, garde tous les noms,
+chiffres, citations et soupçons importants. Garde les indications d'époque : ne mélange jamais passé et présent.
+Supprime toute puce incompréhensible. 40 puces au maximum. N'invente rien. Pas de commentaire.
 
 FICHES :
 {fiches}"""
+
+
+def consigne_langue(langue):
+    if langue == "ar":
+        return ("- LANGUE : arabe standard moderne (فصحى) UNIQUEMENT, sans aucun mot de dialecte. Tous les noms propres "
+                "en écriture arabe, jamais en lettres latines (محمد بن سلمان, السعودية, ماكغريغور…).")
+    return (f"- LANGUE : {LANGUE[langue]} uniquement ; les noms propres dans l'écriture et l'orthographe usuelles "
+            f"de cette langue.")
+
+
+APPEL = {
+    "fr": "Abonnez-vous à « {c} », activez la cloche, et dites-moi en commentaire ce que vous en pensez.",
+    "ar": "اشتركوا في قناة « {c} » وفعّلوا الجرس، واكتبوا لي رأيكم في التعليقات.",
+    "it": "Iscrivetevi a « {c} », attivate la campanella e scrivetemi nei commenti cosa ne pensate.",
+    "en": "Subscribe to “{c}”, hit the bell, and tell me in the comments what you think.",
+}
 
 
 def prompt_ecriture(fiche, nb_sources, langue, mots, chaine, citation=None):
@@ -304,7 +325,9 @@ STYLE
   Exemples de tournures (ne les copie pas toutes) : « Rassurez-vous, ça empire. » ; « Regardez bien la carte. » ; « Vous allez rire. Ou pleurer. Probablement les deux. »
 - Aucune autocensure : garde tous les faits, citations et soupçons de la fiche, sans les adoucir. Les soupçons restent présentés comme des soupçons (« on raconte que », « selon… »).
 - EXACTITUDE : utilise les noms, lieux, dates et chiffres EXACTEMENT comme dans la fiche. N'ajoute aucun fait, chiffre, nom, date ou citation qui n'y figure pas. L'humour et l'analyse portent sur les faits, ils n'en créent pas. N'ajoute aucune autre citation célèbre que celle d'ouverture.
-- Chaque fait n'est dit qu'UNE fois. Aucune phrase répétée.
+- Chaque fait n'est dit qu'UNE fois. Aucune phrase répétée, aucune formule répétée en boucle à la fin.
+- ÉPOQUES : ce qui est historique est présenté comme historique (« en 1964… », « à l'époque du roi… ») ; ne confonds jamais un dirigeant passé avec un dirigeant actuel.
+{consigne_langue(langue)}
 - Jamais de nom ou d'étiquette d'intervenant, jamais de dialogue ni de questions-réponses : uniquement ma voix.
 - Ne parle jamais de transcription, d'erreurs de mots, de licence, de crédits ou de références : seulement du sujet.
 
@@ -392,9 +415,8 @@ def dedoublonner(texte):
         for ph in re.split(r"(?<=[.!?…؟])\s+", p):
             mots_ph = set(re.findall(r"\w+", ph.lower()))
             n = _norm(ph)
-            doublon = len(n) >= 20 and any(
-                n == v[0] or (len(mots_ph) >= 6 and len(mots_ph & v[1]) / len(mots_ph | v[1]) >= 0.8)
-                for v in vues)
+            doublon = (len(n) >= 6 and any(n == v[0] for v in vues)) or (len(n) >= 20 and any(
+                len(mots_ph) >= 6 and len(mots_ph & v[1]) / len(mots_ph | v[1]) >= 0.8 for v in vues))
             if doublon:
                 retire += 1
                 continue
@@ -662,6 +684,8 @@ def main():
     sortie = os.path.join(a.out, f"{meta['prefixe']}_prompteur.txt")
 
     def publier(texte, nom_ia, note=""):
+        if chaine and _norm(chaine) not in _norm(texte):     # appel à s'abonner garanti
+            texte = texte.rstrip() + "\n\n" + APPEL.get(langue, APPEL["fr"]).format(c=chaine) + "\n"
         if citation:                                   # citation d'ouverture, mot pour mot
             variantes = [_norm(v) for v in citation[2] if len(_norm(v)) >= 12]
             paras = [p for p in texte.strip().split("\n\n") if not any(v in _norm(p) for v in variantes)]
