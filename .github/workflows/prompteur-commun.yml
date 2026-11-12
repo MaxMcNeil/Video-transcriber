@@ -1,0 +1,159 @@
+name: Prompteur (commun)
+
+# Appelé par « Transcribe » et « Prompteur seul ». Attend un artefact « travail »
+# (work/meta.json, work/source_NN.json, out/) produit par le job précédent.
+on:
+  workflow_call:
+    inputs:
+      langue:
+        type: string
+        default: auto
+      duree:
+        type: string
+        default: auto
+      ia:
+        type: string
+        default: qwen3-8b
+
+permissions:
+  contents: write
+
+env:
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  HF_HUB_DISABLE_PROGRESS_BARS: "1"
+  PYTHONUNBUFFERED: "1"
+  PARTS: "4"
+
+jobs:
+  # 1) Fiches de faits : chaque serveur prend 1 morceau sur 4 (≈ 4× plus rapide)
+  fiches:
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [0, 1, 2, 3]
+    steps:
+      - name: Préparer
+        run: sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL &
+
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - run: pip install -q huggingface_hub
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: travail
+          path: .
+
+      - name: Fiches attribuées à ce serveur
+        id: n
+        env:
+          LANGUE: ${{ inputs.langue }}
+          PART: ${{ matrix.part }}
+        run: echo "n=$(python prompteur.py --etape compter --part "$PART" --parts "$PARTS" --langue "$LANGUE")" >> "$GITHUB_OUTPUT"
+
+      - name: Installer le moteur IA local
+        if: steps.n.outputs.n != '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash install_llm.sh
+
+      - name: Préparer les fiches
+        if: steps.n.outputs.n != '0'
+        env:
+          LANGUE: ${{ inputs.langue }}
+          IA: ${{ inputs.ia }}
+          PART: ${{ matrix.part }}
+        run: python prompteur.py --etape fiches --part "$PART" --parts "$PARTS" --langue "$LANGUE" --ia "$IA"
+
+      - name: Envoyer les fiches
+        if: always() && steps.n.outputs.n != '0'
+        uses: actions/upload-artifact@v4
+        with:
+          name: fiches-${{ matrix.part }}
+          path: work/fiches/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # 2) Fusion des fiches, citation d'ouverture, écriture, relecture, publication
+  ecrire:
+    needs: fiches
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    steps:
+      - name: Préparer
+        run: |
+          echo "JOB_START=$(date +%s)" >> "$GITHUB_ENV"
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL &
+
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - run: pip install -q huggingface_hub
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: travail
+          path: .
+
+      - name: Récupérer les fiches des 4 serveurs
+        continue-on-error: true      # une fiche manquante sera refaite ici
+        uses: actions/download-artifact@v4
+        with:
+          pattern: fiches-*
+          path: work/fiches
+          merge-multiple: true
+
+      - name: Installer le moteur IA local
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash install_llm.sh
+
+      - name: Écrire le texte prompteur
+        env:
+          LANGUE: ${{ inputs.langue }}
+          DUREE: ${{ inputs.duree }}
+          IA: ${{ inputs.ia }}
+          PROMPTEUR_LIMITE_MIN: "300"
+        run: |
+          mkdir -p out work/fiches
+          echo "Fiches déjà prêtes : $(ls work/fiches | wc -l)"
+          python prompteur.py --langue "$LANGUE" --duree "$DUREE" --ia "$IA"
+
+      - name: Artefact
+        if: always() && hashFiles('out/*_prompteur.txt', 'out/*_fiche.txt') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: prompteur
+          path: |
+            out/*_prompteur.txt
+            out/*_fiche.txt
+
+      - name: Publier dans la Release 'transcriptions'
+        if: always() && hashFiles('out/*_prompteur.txt', 'out/*_fiche.txt') != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view transcriptions >/dev/null 2>&1 || \
+            gh release create transcriptions -t "Transcriptions" -n "Transcriptions et textes prompteur"
+          shopt -s nullglob
+          gh release upload transcriptions out/*_prompteur.txt out/*_fiche.txt --clobber
+          {
+            echo "## Texte prompteur (Release **transcriptions**)"
+            for f in out/*_prompteur.txt out/*_fiche.txt; do echo "- \`$(basename "$f")\`"; done
+            p=$(ls out/*_prompteur.txt 2>/dev/null | head -n1)
+            if [ -n "$p" ]; then
+              echo; echo "### Début du texte prompteur"; echo '```'; head -c 2500 "$p"; echo; echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

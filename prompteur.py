@@ -435,21 +435,54 @@ def decouper(texte, max_tok, langue):
     return morceaux
 
 
-def preparer_fiche(srv, conf, meta, langue):
-    # 1) une FICHE par morceau de transcription (gros morceaux = moins d'appels)
-    fiches = []
+def lister_morceaux(meta):
+    """Liste DÉTERMINISTE des morceaux de transcription : (index global, source, k, n, texte).
+    Identique dans chaque job : sert à répartir les fiches entre plusieurs serveurs."""
+    res, g = [], 0
     for s in meta["sources"]:
         with open(s["fichier"], encoding="utf-8") as f:
             texte = "\n".join(t for _, t in json.load(f)["paragraphes"])
         morceaux = decouper(texte, 11000, s["langue"])
         for k, m in enumerate(morceaux, 1):
-            log(f"Fiche : source {s['n']}/{len(meta['sources'])}, partie {k}/{len(morceaux)}")
-            r, _ = srv.chat(SYS_EXTRACTION,
-                            [{"role": "user", "content": prompt_fiche(m, s["titre"], k, len(morceaux), langue)}],
-                            1500, conf["extraction"])
-            r = r.strip()
-            if r and not re.fullmatch(r"\W*RIEN\W*", r, re.I):
-                fiches.append(r)
+            res.append((g, s, k, len(morceaux), m))
+            g += 1
+    return res
+
+
+def chemin_fiche(work, g):
+    return os.path.join(work, "fiches", f"fiche_{g:03d}.txt")
+
+
+def extraire_fiches(srv, conf, meta, langue, work="work", part=None, parts=1):
+    """Fiche de chaque morceau ; réutilise celles déjà calculées (par un autre serveur)."""
+    os.makedirs(os.path.join(work, "fiches"), exist_ok=True)
+    morceaux = lister_morceaux(meta)
+    for g, s, k, n, m in morceaux:
+        if part is not None and g % parts != part:
+            continue
+        chemin = chemin_fiche(work, g)
+        if os.path.exists(chemin):
+            continue
+        log(f"Fiche {g + 1}/{len(morceaux)} : source {s['n']}/{len(meta['sources'])}, partie {k}/{n}")
+        r, _ = srv.chat(SYS_EXTRACTION,
+                        [{"role": "user", "content": prompt_fiche(m, s["titre"], k, n, langue)}],
+                        1500, conf["extraction"])
+        r = r.strip()
+        if re.fullmatch(r"\W*RIEN\W*", r, re.I):
+            r = ""                                # rien d'utile : fichier vide = déjà traité
+        with open(chemin, "w", encoding="utf-8") as f:
+            f.write(r)
+
+
+def preparer_fiche(srv, conf, meta, langue, work="work"):
+    # 1) une FICHE par morceau (déjà faites en parallèle si le workflow l'a permis)
+    extraire_fiches(srv, conf, meta, langue, work)
+    fiches = []
+    for g, *_ in lister_morceaux(meta):
+        with open(chemin_fiche(work, g), encoding="utf-8") as f:
+            t = f.read().strip()
+        if t:
+            fiches.append(t)
     if not fiches:
         raise RuntimeError("aucune matière utile trouvée dans les transcriptions")
 
@@ -559,6 +592,10 @@ def main():
     p.add_argument("--ia", default="qwen3-8b")
     p.add_argument("--work", default="work")
     p.add_argument("--out", default="out")
+    p.add_argument("--etape", default="tout", choices=["tout", "fiches", "compter"],
+                   help="fiches = seulement les fiches de la part --part sur --parts (travail parallèle)")
+    p.add_argument("--part", type=int, default=0)
+    p.add_argument("--parts", type=int, default=1)
     a = p.parse_args()
 
     with open(os.path.join(ICI, "config.json"), encoding="utf-8") as f:
@@ -583,6 +620,32 @@ def main():
     if a.duree not in LONGUEURS:
         mots = min(mots, max(150, total_mots))      # jamais plus long que la matière
     chaine = config["chaines"].get(langue, "")
+
+    if a.etape == "compter":                          # nb de fiches pour cette part
+        print(sum(1 for g, *_ in lister_morceaux(meta) if g % a.parts == a.part))
+        return
+    if a.etape == "fiches":
+        mes = [g for g, *_ in lister_morceaux(meta) if g % a.parts == a.part]
+        if not mes:
+            log("Aucune fiche pour cette part.")
+            return
+        log(f"Part {a.part + 1}/{a.parts} : {len(mes)} fiche(s) à préparer.")
+        noms_ia = [a.ia] + [k for k in config["ia"] if k != a.ia]
+        for nom_ia in noms_ia[:2]:
+            srv = None
+            try:
+                conf = config["ia"][nom_ia]
+                srv = Serveur(telecharger_modele(conf), conf)
+                srv.demarrer()
+                extraire_fiches(srv, conf, meta, langue, a.work, a.part, a.parts)
+                return
+            except Exception as e:
+                avertir(f"Fiches avec {nom_ia} : {e}")
+            finally:
+                if srv:
+                    srv.arreter()
+        avertir("Fiches de cette part non terminées : elles seront refaites à l'étape d'écriture.")
+        return
 
     ordre = [a.ia] + [k for k in config["ia"] if k != a.ia]
     if a.ia not in config["ia"]:
@@ -618,7 +681,7 @@ def main():
             srv = Serveur(telecharger_modele(conf), conf)
             srv.demarrer()
             if fiche is None:
-                fiche = preparer_fiche(srv, conf, meta, langue)   # calculée une seule fois
+                fiche = preparer_fiche(srv, conf, meta, langue, a.work)   # calculée une seule fois
                 citation = choisir_citation(srv, conf, fiche, langue, meta["prefixe"])
             for essai in range(2):
                 if essai and reste_min() < 25:

@@ -35,7 +35,12 @@ Transcription 100 % locale d'une ou plusieurs vidéos/audios (2 min à plusieurs
 - `…_fiche.txt` → les faits utilisés (à vérifier avant le live)
 - `…_transcription.txt` → tout ce qui a été dit
 
-### 4. Si le run est rouge
+### 4. Refaire seulement le texte prompteur (sans retranscrire)
+Autre langue, autre longueur, ou run coupé avant le prompteur :
+**Actions → Prompteur seul → Run workflow** → laisse **transcription** vide (= la plus récente), choisis la **langue** → Run.
+Environ 30 à 60 min, quelle que soit la durée des vidéos (les fiches sont préparées sur 4 serveurs en parallèle).
+
+### 5. Si le run est rouge
 - Rouge **sans aucune étape** (« startup failure ») → ouvre le run → **Re-run all jobs**.
 - Rouge sur une étape → envoie-moi la capture ou le lien du run.
 

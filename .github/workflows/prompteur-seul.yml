@@ -1,0 +1,80 @@
+name: Prompteur seul
+
+# Refait le texte prompteur à partir d'une transcription déjà publiée,
+# sans retranscrire (autre langue, autre longueur, run précédent coupé…).
+on:
+  workflow_dispatch:
+    inputs:
+      transcription:
+        description: "Fichier …_transcription.txt de la Release 'transcriptions' (VIDE = la plus récente)"
+        required: false
+        default: ""
+      langue:
+        description: "Langue du texte prompteur"
+        type: choice
+        options: [auto, ar, fr, it, en]
+        default: auto
+      duree:
+        description: "Longueur (auto ≈ selon la matière ; court ≈ 3 min, moyen ≈ 6 min, long ≈ 10 min)"
+        type: choice
+        options: [auto, court, moyen, long]
+        default: auto
+      ia:
+        description: "IA locale (l'autre sert de secours)"
+        type: choice
+        options: [qwen3-8b, mistral-nemo-12b]
+        default: qwen3-8b
+
+permissions:
+  contents: write
+
+jobs:
+  preparer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Récupérer la transcription
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NOM: ${{ inputs.transcription }}
+        run: |
+          NOM="$(printf '%s' "$NOM" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+          liste="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/transcriptions" \
+                   -q '.assets | sort_by(.created_at) | reverse | .[].name' | grep -E '_transcription\.txt$')"
+          if [ -z "$NOM" ]; then
+            NOM="$(printf '%s\n' "$liste" | head -n1)"
+          else
+            NOM="$(printf '%s\n' "$liste" | grep -Fx -- "$NOM" || printf '%s\n' "$liste" | grep -Fi -- "$NOM" | head -n1)"
+          fi
+          [ -n "$NOM" ] || { echo "::error::Transcription introuvable dans la Release 'transcriptions'."; exit 1; }
+          echo "Transcription : $NOM"
+          mkdir -p src out
+          motif="$(printf '%s' "$NOM" | sed 's/[][*?\\]/\\&/g')"
+          gh release download transcriptions -p "$motif" -D src --clobber
+          python depuis_transcription.py "src/$NOM"
+          touch out/.garde
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: travail
+          path: |
+            work/
+            out/
+          include-hidden-files: true
+          retention-days: 7
+
+  prompteur:
+    needs: preparer
+    uses: ./.github/workflows/prompteur-commun.yml
+    with:
+      langue: ${{ inputs.langue }}
+      duree: ${{ inputs.duree }}
+      ia: ${{ inputs.ia }}
+    permissions:
+      contents: write

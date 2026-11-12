@@ -13,7 +13,7 @@ on:
         options: [auto, fr, ar, it, en, non]
         default: auto
       duree_prompteur:
-        description: "Longueur du texte prompteur (auto ≈ selon la matière ; court ≈ 3 min, moyen ≈ 7 min, long ≈ 13 min)"
+        description: "Longueur du texte prompteur (auto ≈ selon la matière ; court ≈ 3 min, moyen ≈ 6 min, long ≈ 10 min)"
         type: choice
         options: [auto, court, moyen, long]
         default: auto
@@ -111,20 +111,15 @@ jobs:
           TRAD: ${{ inputs.translate }}
         run: python transcribe.py --model "$MODEL" --translate "$TRAD"
 
-      - name: Installer le moteur IA local
-        if: inputs.prompteur != 'non'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: bash install_llm.sh
-
-      - name: Écrire le texte prompteur
-        if: inputs.prompteur != 'non'
-        timeout-minutes: 170
-        env:
-          LANGUE: ${{ inputs.prompteur }}
-          DUREE: ${{ inputs.duree_prompteur }}
-          IA: ${{ inputs.ia }}
-        run: python prompteur.py --langue "$LANGUE" --duree "$DUREE" --ia "$IA"
+      - name: Garder le travail pour l'écriture du prompteur
+        if: always() && hashFiles('work/meta.json') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: travail
+          path: |
+            work/
+            out/
+          retention-days: 7
 
       # Les étapes suivantes tournent même en cas d'échec ou de coupure,
       # pour toujours récupérer ce qui a été produit.
@@ -157,12 +152,21 @@ jobs:
               echo; echo "### ⚠️ Sources non récupérées"
               sed 's/^/- /' in/echecs.txt
             fi
-            p=$(ls out/*_prompteur.txt 2>/dev/null | head -n1)
-            if [ -n "$p" ]; then
-              echo; echo "### Début du texte prompteur"; echo '```'; head -c 1800 "$p"; echo; echo '```'
-            fi
+            echo; echo "_Le texte prompteur est écrit ensuite par le job « prompteur » (fiches en parallèle)._"
             t=$(ls out/*_transcription.txt 2>/dev/null | head -n1)
             if [ -n "$t" ]; then
               echo; echo "### Début de la transcription"; echo '```'; head -c 1000 "$t"; echo; echo '```'
             fi
           } >> "$GITHUB_STEP_SUMMARY"
+
+  # Texte prompteur : fiches réparties sur 4 serveurs en parallèle, puis écriture
+  prompteur:
+    needs: transcribe
+    if: inputs.prompteur != 'non'
+    uses: ./.github/workflows/prompteur-commun.yml
+    with:
+      langue: ${{ inputs.prompteur }}
+      duree: ${{ inputs.duree_prompteur }}
+      ia: ${{ inputs.ia }}
+    permissions:
+      contents: write
