@@ -394,6 +394,7 @@ def nettoyer(texte):
         s = re.sub(r"\[[^\]]{1,60}\]|\((?:pause|rires?|silence|soupir|musique)[^)]*\)", "", s, flags=re.I)
         s = re.sub(r"</?[a-z][^>]{0,30}>", "", s)      # balises
         s = EMOJI.sub("", s)
+        s = re.sub(r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af]+", "", s)   # chinois/japonais/coréen parasites
         s = " ".join(s.split())
         s = re.sub(r"\s+([.,])", r"\1", s)
         if not s:
