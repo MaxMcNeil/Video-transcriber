@@ -20,7 +20,9 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 LANGS = ("fr", "it", "en", "ar")
-NOMS = {"fr": "français", "it": "italien", "en": "anglais", "ar": "arabe"}
+NOMS = {"fr": "français", "it": "italien", "en": "anglais", "ar": "arabe", "es": "espagnol", "pt": "portugais",
+        "de": "allemand", "fa": "persan", "ur": "ourdou", "tr": "turc", "he": "hébreu", "ru": "russe",
+        "uk": "ukrainien", "zh": "chinois", "hi": "hindi", "nl": "néerlandais"}
 DEBUT_JOB = float(os.environ.get("JOB_START", time.time()))
 LIMITE_JOB_MIN = 300  # arrêt propre bien avant les 6 h de GitHub
 
@@ -217,8 +219,16 @@ def main():
         _, _, probas = model.detect_language(audio, vad_filter=True, language_detection_segments=8,
                                              language_detection_threshold=0.9)
         probas = dict(probas or [])
-        langue = max(LANGS, key=lambda l: probas.get(l, 0.0))
-        log(f"Langue : {langue} ({probas.get(langue, 0):.0%})")
+        brut = max(probas, key=probas.get) if probas else "fr"
+        p_brut = probas.get(brut, 0.0)
+        # fr/it/en/ar en priorité ; une autre langue n'est gardée que si Whisper en est sûr
+        # (l'arabe du Golfe est parfois pris pour du persan/ourdou : seuil plus strict pour eux)
+        seuil = 0.9 if brut in ("fa", "ur", "ps", "ku") else 0.6
+        if brut in LANGS or p_brut >= seuil:
+            langue = brut
+        else:
+            langue = max(LANGS, key=lambda l: probas.get(l, 0.0))
+        log(f"Langue : {langue} ({probas.get(langue, 0):.0%}) [détection brute : {brut} {p_brut:.0%}]")
 
         segments, _ = model.transcribe(
             audio, language=langue, vad_filter=True,
@@ -253,7 +263,7 @@ def main():
 
         paras = paragraphes(segs)
         txt.write(f"\n\n════════ SOURCE {i}/{len(sources)} : {s['titre']} "
-                  f"({NOMS[langue]}, {duree_txt(dur)}) ════════\n")
+                  f"({NOMS.get(langue, langue)}, {duree_txt(dur)}) ════════\n")
         for debut, texte in paras:
             txt.write(f"\n[{hhmm(debut)}] {texte}\n")
         txt.flush()

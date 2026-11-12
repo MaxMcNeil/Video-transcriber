@@ -531,8 +531,9 @@ def main():
     else:
         poids = {}
         for s in meta["sources"]:
-            poids[s["langue"]] = poids.get(s["langue"], 0) + s["mots"]
-        langue = max(poids, key=poids.get)
+            if s["langue"] in LANGUE:                 # prompteur seulement en fr/ar/it/en
+                poids[s["langue"]] = poids.get(s["langue"], 0) + s["mots"]
+        langue = max(poids, key=poids.get) if poids else "fr"
     total_mots = sum(s["mots"] for s in meta["sources"])
     mots = LONGUEURS.get(a.duree) or min(900, max(250, int(total_mots * 0.25)))
     if a.duree not in LONGUEURS:

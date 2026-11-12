@@ -10,8 +10,9 @@ Transcription 100 % locale d'une ou plusieurs vidéos/audios (2 min à plusieurs
 1. Dans l'appli **YouTube**, ouvre la vidéo → **Partager** → **Termux**.
 2. Termux affiche la **liste des vidéos en attente**, puis :
    - **Entrée** (ou 20 secondes sans rien faire) → lance la transcription de toute la liste ;
-   - **`a`** → garde la vidéo et attend la suivante : retourne sur YouTube et partage la vidéo suivante ;
-   - **`x`** → vide la liste sans rien lancer.
+   - **`ar` + Entrée** → lance avec le **texte prompteur en arabe**, quelles que soient les langues des vidéos (`fr`, `it`, `en` : idem) ;
+   - **`a` + Entrée** → garde la vidéo et attend la suivante : retourne sur YouTube et partage la vidéo suivante ;
+   - **`x` + Entrée** → vide la liste sans rien lancer.
 3. Quand Termux affiche **✅ Transcription lancée**, tu peux fermer Termux.
 
 > 💡 **Chaque partage ouvre une NOUVELLE fenêtre Termux : c'est normal.** Les vidéos partagées avant ne sont pas perdues, la nouvelle fenêtre les affiche toutes dans la liste.

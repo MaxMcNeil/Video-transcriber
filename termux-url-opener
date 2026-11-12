@@ -26,11 +26,17 @@ while IFS= read -r l; do
   n=$((n + 1)); echo "  $n. $l"
 done < "$FILE"
 echo
-echo "  Entrée  = LANCER ces $nb vidéo(s) ensemble (un seul texte prompteur)"
-echo "  a       = attendre : partage la vidéo suivante"
-echo "  x       = vider la liste et ne rien lancer"
+echo "  Entrée       = LANCER ces $nb vidéo(s) ensemble (prompteur dans la langue des vidéos)"
+echo "  ar + Entrée  = LANCER avec le prompteur en ARABE   (fr / it / en : idem)"
+echo "  a  + Entrée  = attendre : partage la vidéo suivante"
+echo "  x  + Entrée  = vider la liste et ne rien lancer"
 echo
 read -r -t 20 choix || choix=""
+choix="$(printf '%s' "$choix" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')"
+langue="auto"
+case "$choix" in
+  ar|fr|it|en) langue="$choix"; choix="" ;;
+esac
 case "$choix" in
   a|A)
     echo "✅ Gardé. Partage la vidéo suivante vers Termux (tu peux fermer cette fenêtre)."
@@ -42,7 +48,8 @@ case "$choix" in
 esac
 mapfile -t liens < <(sed '/^$/d' "$FILE")
 rm -f "$FILE"
-bash ~/yt2release.sh "${liens[@]}"
+[ "$langue" != auto ] && echo "Prompteur en : $langue"
+PROMPTEUR="$langue" bash ~/yt2release.sh "${liens[@]}"
 echo
 echo "Tu peux fermer Termux (le traitement continue sur GitHub)."
 read -r -t 30 _ || true
