@@ -707,11 +707,15 @@ def main():
     # Langue de TRAVAIL de l'IA : anglais pour les langues qu'elle écrit mal (fiche + texte),
     # puis traduction finale ; doit être identique dans tous les jobs (fiches en parallèle).
     travail = "en" if langue in config.get("langues_pivot", ["ar"]) else langue
-    if travail != langue:
+    if travail != langue and a.etape != "compter":
         log(f"L'IA travaille en anglais, puis traduit le texte final en {LANGUE[langue].split(' (')[0]}.")
 
     if a.etape == "compter":                          # nb de fiches pour cette part
-        print(sum(1 for g, *_ in lister_morceaux(meta) if g % a.parts == a.part))
+        n = sum(1 for g, *_ in lister_morceaux(meta) if g % a.parts == a.part)
+        if os.environ.get("GITHUB_OUTPUT"):          # écrit directement : aucun message parasite possible
+            with open(os.environ["GITHUB_OUTPUT"], "a") as g:
+                g.write(f"n={n}\n")
+        print(n)
         return
     if a.etape == "fiches":
         mes = [g for g, *_ in lister_morceaux(meta) if g % a.parts == a.part]

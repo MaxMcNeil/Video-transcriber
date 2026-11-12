@@ -56,7 +56,7 @@ jobs:
         env:
           LANGUE: ${{ inputs.langue }}
           PART: ${{ matrix.part }}
-        run: echo "n=$(python prompteur.py --etape compter --part "$PART" --parts "$PARTS" --langue "$LANGUE")" >> "$GITHUB_OUTPUT"
+        run: python prompteur.py --etape compter --part "$PART" --parts "$PARTS" --langue "$LANGUE"
 
       - name: Installer le moteur IA local
         if: steps.n.outputs.n != '0'
