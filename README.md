@@ -68,8 +68,9 @@ Le résumé du run affiche le début du prompteur et de la transcription.
 - Les sources sont fusionnées en **une seule histoire fluide**, regroupée par idées.
 - Interviews et débats deviennent **ton propre propos**, comme si tu parlais en live.
 - Musique, chansons, jingles, intros/outros, pubs, présentations d'invités : ignorés.
-- Structure rétention : **hook choc** → promesse → blocs avec relances → appel à liker → chute + abonnement.
-- Ton moqueur, humour noir, phrases courtes, aucune autocensure ; aucun fait inventé.
+- Ouverture par une **citation célèbre** choisie selon le sujet, tirée d'une banque de citations **vérifiées** (`citations.json`, en fr/ar/it/en) : jamais de citation inventée.
+- Structure rétention : citation → **hook ultra-choc** → promesse → blocs avec relances et **décryptage stratégique** (qui gagne, qui perd, rapports de force) → appel à liker → **scénario de la suite** (présenté comme une analyse) → chute + abonnement.
+- Ton : **alarme et indignation** + **stratège géopolitique** + **humour noir** en contrepoint ; phrases courtes, aucune autocensure ; aucun fait inventé.
 - Texte brut : pas de titres, pas de markdown, un paragraphe par idée.
 - Nom de la chaîne cité dans l'appel à l'abonnement selon la langue : modifiable dans `config.json`.
 

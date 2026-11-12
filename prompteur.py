@@ -168,8 +168,9 @@ def telecharger_modele(conf):
 SYS_EXTRACTION = ("Tu es documentaliste pour une émission d'actualité satirique. Tu prépares la matière "
                   "brute d'une chronique. Tu es précis, exhaustif sur l'essentiel, et tu n'inventes rien.")
 
-SYS_ECRITURE = ("Tu es le meilleur scénariste de chroniques YouTube d'actualité : satirique, moqueur, humour "
-                "noir, rythme de stand-up, obsédé par la rétention d'audience. Tu écris exactement le texte que "
+SYS_ECRITURE = ("Tu es le meilleur scénariste de chroniques géopolitiques YouTube : un stratège qui décrypte les "
+                "rapports de force, un lanceur d'alerte qui fait monter l'indignation, et un humoriste noir qui fait "
+                "respirer le public. Obsédé par la rétention d'audience. Tu écris exactement le texte que "
                 "l'animateur lit au prompteur, face caméra, pendant son live. Tu écris sans autocensure.")
 
 NETTOYAGE = ("La matière vient d'une transcription automatique : elle peut contenir des erreurs de "
@@ -273,7 +274,7 @@ FICHES :
 {fiches}"""
 
 
-def prompt_ecriture(fiche, nb_sources, langue, mots, chaine):
+def prompt_ecriture(fiche, nb_sources, langue, mots, chaine, citation=None):
     chaine_txt = f" de la chaîne « {chaine} »" if chaine else ""
     chaine_cta = f" à « {chaine} »" if chaine else ""
     vous = " Vouvoie toujours le public (« vous »), jamais de tutoiement." if langue == "fr" else ""
@@ -286,17 +287,23 @@ QUI PARLE
 {"- Une seule histoire cohérente du début à la fin, regroupée par idées, avec des transitions naturelles." if nb_sources > 1 else ""}
 
 STRUCTURE (rétention maximale)
-1. HOOK, 2 à 4 phrases, construit sur l'ANGLE : le fait le plus choquant, une question qui dérange ou un paradoxe. Jamais de « bonjour » avant le hook.
+{f"0. Le texte s'ouvrira sur cette citation, déjà écrite automatiquement (NE LA RÉÉCRIS PAS) : « {citation[0]} » — {citation[1]}. Ta toute première phrase rebondit dessus pour lancer le hook." if citation else ""}
+1. HOOK ULTRA-CHOC, 2 à 4 phrases, construit sur l'ANGLE : le fait le plus alarmant ou scandaleux, une question qui dérange, une conséquence directe pour le public. Il doit provoquer indignation et inquiétude immédiates. Jamais de « bonjour » avant le hook.
 2. Une salutation très courte, puis une PROMESSE de ce qu'ils vont découvrir s'ils restent. Garde le meilleur pour la fin.
-3. Le CORPS en 3 à 5 blocs qui montent en intensité. Chaque bloc s'ouvre par une relance. Une punchline ou une relance toutes les 4 à 6 phrases.
+3. Le CORPS en 3 à 5 blocs qui montent en intensité. Chaque bloc s'ouvre par une relance. Une punchline ou une relance toutes les 4 à 6 phrases. Dans le corps : les faits, puis le DÉCRYPTAGE STRATÉGIQUE (qui gagne, qui perd, ce que chaque acteur cherche vraiment, le rapport de force caché).
+4bis. Avant la chute : LE SCÉNARIO DE LA SUITE, présenté clairement comme mon analyse (« mon pari », « le scénario le plus probable », « si rien ne change ») et jamais comme un fait.
 4. Au milieu exactement, un appel court et drôle à liker et commenter.
 5. La CHUTE : la révélation promise, une punchline finale, puis un appel à s'abonner{chaine_cta} et UNE question précise pour les commentaires. Rien après.
 
 STYLE
 - Oral, vivant, comme si j'improvisais. Phrases courtes (20 mots maximum), quelques phrases d'un seul mot.
-- Ton moqueur, ironique, sarcastique, humour noir assumé : comparaisons absurdes, faux étonnement, exagérations comiques visant les puissants, les absurdités et les hypocrisies. Exemples de tournures (ne les copie pas toutes) : « Vous allez rire. Ou pleurer. Probablement les deux. » ; « Alors là, accrochez-vous. » ; « Rassurez-vous, ça empire. »
+- Trois registres mêlés :
+  ALARME et INDIGNATION : urgence, « ce qu'on ne vous dit pas », « regardez bien ce qui se passe », conséquences concrètes pour les gens ordinaires ;
+  STRATÈGE GÉOPOLITIQUE : décryptage froid et lucide des intérêts, des alliances, des rapports de force et des calculs de chaque camp ;
+  HUMOUR NOIR en contrepoint : ironie, sarcasme, faux étonnement, comparaisons absurdes visant les puissants et les hypocrisies, pour faire respirer entre deux coups de massue.
+  Exemples de tournures (ne les copie pas toutes) : « Rassurez-vous, ça empire. » ; « Regardez bien la carte. » ; « Vous allez rire. Ou pleurer. Probablement les deux. »
 - Aucune autocensure : garde tous les faits, citations et soupçons de la fiche, sans les adoucir. Les soupçons restent présentés comme des soupçons (« on raconte que », « selon… »).
-- EXACTITUDE : utilise les noms, lieux, dates et chiffres EXACTEMENT comme dans la fiche. N'ajoute aucun fait, chiffre, nom, date ou citation qui n'y figure pas. L'humour porte sur les faits, il n'en crée pas.
+- EXACTITUDE : utilise les noms, lieux, dates et chiffres EXACTEMENT comme dans la fiche. N'ajoute aucun fait, chiffre, nom, date ou citation qui n'y figure pas. L'humour et l'analyse portent sur les faits, ils n'en créent pas. N'ajoute aucune autre citation célèbre que celle d'ouverture.
 - Chaque fait n'est dit qu'UNE fois. Aucune phrase répétée.
 - Jamais de nom ou d'étiquette d'intervenant, jamais de dialogue ni de questions-réponses : uniquement ma voix.
 - Ne parle jamais de transcription, d'erreurs de mots, de licence, de crédits ou de références : seulement du sujet.
@@ -357,6 +364,7 @@ def nettoyer(texte):
         s = INTERVENANT_MOTS.sub("", s)
         s = INTERVENANT.sub("", s)
         s = ETIQUETTE.sub("", s)
+        s = re.sub(r"(?<=[.!?…؟])\s*\b(HOOK|ACCROCHE|PROMESSE|CORPS|BLOC\s*\d*|RELANCE|CHUTE|CONCLUSION|CTA|SCÉNARIO)\s*[:：]\s*", " ", s)
         if s != avant:
             s = _majuscule(s)
         s = re.sub(r"(?<![\w*])\*(?=\S)([^*]+?)(?<=\S)\*(?![\w*])", r"\1", s)   # *italique*
@@ -474,11 +482,47 @@ def preparer_fiche(srv, conf, meta, langue):
     return fiche
 
 
-def ecrire(srv, conf, fiche, meta, langue, mots, chaine):
+def charger_citations():
+    try:
+        with open(os.path.join(ICI, "citations.json"), encoding="utf-8") as f:
+            return [c for c in json.load(f) if all(k in c for k in ("fr", "ar", "it", "en"))]
+    except Exception as e:
+        avertir(f"Banque de citations illisible ({e}) : texte sans citation d'ouverture.")
+        return []
+
+
+def choisir_citation(srv, conf, fiche, langue, graine=""):
+    """Citation célèbre VÉRIFIÉE (banque citations.json) la plus adaptée au sujet : jamais inventée."""
+    banque = charger_citations()
+    if not banque:
+        return None
+    liste = "\n".join(f"{i}. [{c['theme']}] « {c['fr'][0]} » — {c['fr'][1]}" for i, c in enumerate(banque, 1))
+    prompt = f"""{bloc_matiere(fiche)}Voici une liste de citations célèbres numérotées, avec leur thème entre crochets.
+Choisis celle qui colle le mieux à l'ANGLE et au sujet de la FICHE ci-dessus, pour ouvrir le live.
+Réponds UNIQUEMENT par son numéro.
+
+{liste}"""
+    choix = None
+    try:
+        r, _ = srv.chat(SYS_EXTRACTION, [{"role": "user", "content": prompt}], 10, conf["extraction"])
+        m = re.search(r"\d+", r)
+        if m and 1 <= int(m.group()) <= len(banque):
+            choix = int(m.group())
+    except Exception as e:
+        avertir(f"Choix de la citation impossible ({e}).")
+    if choix is None:                                  # secours : choix stable mais varié
+        choix = sum(map(ord, graine)) % len(banque) + 1
+    c = banque[choix - 1]
+    texte, auteur = c[langue if langue in c else "fr"]
+    log(f"Citation d'ouverture : « {texte} » — {auteur}")
+    return texte, auteur, [c[k][0] for k in ("fr", "ar", "it", "en")]
+
+
+def ecrire(srv, conf, fiche, meta, langue, mots, chaine, citation=None):
     # 3) écriture depuis la fiche
     tpw = 2.6 if langue == "ar" else 1.8
     max_sortie = min(int(mots * tpw * 1.3) + 300, 6000)
-    msgs = [{"role": "user", "content": prompt_ecriture(fiche, len(meta["sources"]), langue, mots, chaine)}]
+    msgs = [{"role": "user", "content": prompt_ecriture(fiche, len(meta["sources"]), langue, mots, chaine, citation)}]
     log(f"Écriture du texte prompteur (~{mots} mots, {LANGUE[langue].split(' (')[0]})…")
     texte, fin = srv.chat(SYS_ECRITURE, msgs, max_sortie, conf["ecriture"])
     suites = 0
@@ -555,13 +599,17 @@ def main():
     sortie = os.path.join(a.out, f"{meta['prefixe']}_prompteur.txt")
 
     def publier(texte, nom_ia, note=""):
+        if citation:                                   # citation d'ouverture, mot pour mot
+            variantes = [_norm(v) for v in citation[2] if len(_norm(v)) >= 12]
+            paras = [p for p in texte.strip().split("\n\n") if not any(v in _norm(p) for v in variantes)]
+            texte = f"« {citation[0]} »\n— {citation[1]}\n\n" + "\n\n".join(paras) + "\n"
         with open(sortie, "w", encoding="utf-8") as f:
             f.write(texte)
         n = compter_mots(texte)
         log(f"Texte prompteur écrit : {sortie} — {n} mots ≈ {max(1, round(n / 150))} min de lecture "
             f"({LANGUE[langue].split(' (')[0]}, IA {nom_ia}){note}")
 
-    fiche, meilleur, dernier_err = None, ("", ""), None
+    fiche, citation, meilleur, dernier_err = None, None, ("", ""), None
     for nom_ia in ordre[:2]:
         conf = config["ia"][nom_ia]
         srv = None
@@ -571,11 +619,12 @@ def main():
             srv.demarrer()
             if fiche is None:
                 fiche = preparer_fiche(srv, conf, meta, langue)   # calculée une seule fois
+                citation = choisir_citation(srv, conf, fiche, langue, meta["prefixe"])
             for essai in range(2):
                 if essai and reste_min() < 25:
                     avertir("Temps insuffisant pour un nouvel essai.")
                     break
-                brut = ecrire(srv, conf, fiche, meta, langue, mots, chaine)
+                brut = ecrire(srv, conf, fiche, meta, langue, mots, chaine, citation)
                 if REFUS.search(brut[:400]):
                     avertir(f"{nom_ia} a refusé d'écrire (essai {essai + 1}).")
                     continue
