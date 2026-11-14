@@ -79,7 +79,7 @@ Le résumé du run affiche le début du prompteur et de la transcription.
 - Interviews et débats deviennent **ton propre propos**, comme si tu parlais en live.
 - Musique, chansons, jingles, intros/outros, pubs, présentations d'invités : ignorés.
 - Ouverture par une **citation célèbre** choisie selon le sujet, tirée d'une banque de citations **vérifiées** (`citations.json`, en fr/ar/it/en) : jamais de citation inventée.
-- Structure rétention : citation → **hook ultra-choc** → promesse → blocs avec relances et **décryptage stratégique** (qui gagne, qui perd, rapports de force) → appel à liker → **scénario de la suite** (présenté comme une analyse) → chute + abonnement.
+- **Format live YouTube** : citation → **cold open ultra-choc** → promesse en compte à rebours (« X révélations, la dernière est la plus grave ») + appel au partage → **un segment par révélation**, de la moins grave à la plus grave (faits, **décryptage stratégique**, punchline, **question au chat**) → **récap pour ceux qui arrivent** toutes les ~8 min → **scénario de la suite** + **sondage oral** (« tapez 1 / tapez 2 ») → chute + abonnement + annonce du prochain live.
 - Ton : **alarme et indignation** + **stratège géopolitique** + **humour noir** en contrepoint ; phrases courtes, aucune autocensure ; aucun fait inventé.
 - Texte brut : pas de titres, pas de markdown, un paragraphe par idée.
 - Nom de la chaîne cité dans l'appel à l'abonnement selon la langue : modifiable dans `config.json` (ajouté automatiquement si l'IA l'oublie).

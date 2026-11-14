@@ -187,7 +187,8 @@ RUBRIQUES = """ANGLE : la phrase la plus choquante, absurde ou scandaleuse de to
 FAITS : les faits essentiels, avec noms, lieux, dates et chiffres EXACTS tels qu'ils apparaissent (corrige seulement les erreurs évidentes de reconnaissance).
 CITATIONS : les déclarations les plus percutantes, presque mot pour mot, avec qui les a dites.
 SOUPÇONS : accusations, soupçons et rumeurs évoqués, avec qui les porte.
-ABSURDITÉS : contradictions, hypocrisies, détails ridicules DU SUJET à moquer (jamais les erreurs de transcription)."""
+ABSURDITÉS : contradictions, hypocrisies, détails ridicules DU SUJET à moquer (jamais les erreurs de transcription).
+RÉVÉLATIONS : les 3 à 5 éléments les plus explosifs pour le public, classés du moins grave au PLUS grave (le dernier = la bombe du live)."""
 
 
 def prompt_fiche(texte, titre, k, n, langue):
@@ -308,15 +309,15 @@ QUI PARLE
 - Les déclarations des personnalités qui FONT l'actualité restent les leurs (« Untel a osé dire que… ») et je réagis dessus.
 {"- Une seule histoire cohérente du début à la fin, regroupée par idées, avec des transitions naturelles." if nb_sources > 1 else ""}
 
-STRUCTURE (rétention maximale)
+STRUCTURE D'UN LIVE YOUTUBE (rétention maximale ; les spectateurs arrivent en cours de route)
 {f"0. Le texte s'ouvrira sur cette citation, déjà écrite automatiquement (NE LA RÉÉCRIS PAS) : « {citation[0]} » — {citation[1]}. Ta toute première phrase rebondit dessus pour lancer le hook." if citation else ""}
-1. HOOK ULTRA-CHOC, 2 à 4 phrases, construit sur l'ANGLE : le fait le plus alarmant ou scandaleux, une question qui dérange, une conséquence directe pour le public. Il doit provoquer indignation et inquiétude immédiates. Jamais de « bonjour » avant le hook.
-2. Une salutation très courte, puis une PROMESSE de ce qu'ils vont découvrir s'ils restent. Garde le meilleur pour la fin.
-3. Le CORPS en 3 à 5 blocs qui montent en intensité. Chaque bloc s'ouvre par une relance. Une punchline ou une relance toutes les 4 à 6 phrases. Dans le corps : les faits, puis le DÉCRYPTAGE STRATÉGIQUE (qui gagne, qui perd, ce que chaque acteur cherche vraiment, le rapport de force caché).
-4bis. Avant la chute : LE SCÉNARIO DE LA SUITE, présenté clairement comme mon analyse (« mon pari », « le scénario le plus probable », « si rien ne change ») et jamais comme un fait.
-4. Au milieu exactement, un appel court et drôle à liker et commenter.
-5. La CHUTE : la révélation promise, une punchline finale, puis un appel à s'abonner{chaine_cta} et UNE question précise pour les commentaires. Rien après.
-
+1. COLD OPEN, 30 secondes : HOOK ULTRA-CHOC de 2 à 4 phrases construit sur l'ANGLE, le fait le plus alarmant ou scandaleux, une conséquence directe pour le public. Indignation et inquiétude immédiates. Jamais de « bonjour » avant le hook.
+2. Salutation très courte, puis la PROMESSE en compte à rebours, basée sur les RÉVÉLATIONS de la fiche : « Ce soir, X révélations. La dernière est la plus grave. » Et tout de suite : « Partagez ce live maintenant à ceux qui doivent l'entendre. »
+3. UN SEGMENT PAR RÉVÉLATION, du moins grave au plus grave (la bombe à la fin). Chaque segment : mini-hook d'ouverture, les faits, le DÉCRYPTAGE STRATÉGIQUE (qui gagne, qui perd, ce que chaque acteur cherche vraiment, le rapport de force caché), une punchline d'humour noir, puis UNE question précise au chat (« Dites-moi dans le chat : … »). Une relance toutes les 4 à 6 phrases.
+4. Environ toutes les 8 minutes de lecture (≈ 1 200 mots), un RÉCAP de 2 phrases pour ceux qui arrivent (« Pour ceux qui nous rejoignent : … ») suivi d'un rappel like/partage, sans casser le rythme. Au milieu exact du texte, l'appel au like doit être drôle et percutant.
+5. Avant la chute : LE SCÉNARIO DE LA SUITE, présenté clairement comme mon analyse (« mon pari », « le scénario le plus probable », « si rien ne change ») et jamais comme un fait, suivi d'un SONDAGE ORAL : « Tapez 1 dans le chat si…, tapez 2 si… ».
+6. La CHUTE : la révélation la plus grave tenue jusqu'ici, une punchline finale, un appel à s'abonner{chaine_cta} avec la cloche, l'annonce du prochain live, puis UNE question finale pour les commentaires. Rien après.
+- Ne garde que le contenu FORT : ce qui choque, indigne, inquiète ou fait rire jaune. Écarte les détails secondaires ou techniques qui feraient décrocher.
 STYLE
 - Oral, vivant, comme si j'improvisais. Phrases courtes (20 mots maximum), quelques phrases d'un seul mot.
 - Trois registres mêlés :
@@ -687,8 +688,10 @@ def completer(srv, conf, texte, fiche, langue, mots):
 
 {chr(10).join(corps[-12:])}
 
-Écris la SUITE : environ {min(manque, 1200)} mots de nouveaux blocs, même langue, même ton, avec relances et humour noir,
-sur des aspects de la FICHE pas encore traités. Ne répète rien de ce qui précède, n'écris pas de conclusion.
+Écris la SUITE : environ {min(manque, 1200)} mots de nouveaux SEGMENTS de live, même langue, même ton, sur des aspects
+de la FICHE pas encore traités. Chaque segment : mini-hook, faits, décryptage stratégique, punchline d'humour noir, puis une
+question au chat (« Dites-moi dans le chat : … »). Commence par un récap de 2 phrases pour ceux qui rejoignent le live.
+Ne répète rien de ce qui précède, n'écris pas de conclusion.
 N'ajoute aucun fait absent de la FICHE. Texte brut, un paragraphe par idée."""
         tpw = 2.6 if langue == "ar" else 1.8
         r, _ = srv.chat(SYS_ECRITURE, [{"role": "user", "content": msg}], min(int(min(manque, 1200) * tpw * 1.3) + 300, 7000),
@@ -752,8 +755,8 @@ def main():
                 poids[s["langue"]] = poids.get(s["langue"], 0) + s["mots"]
         langue = max(poids, key=poids.get) if poids else "fr"
     total_mots = sum(s["mots"] for s in meta["sources"])
-    # auto : ≈ 1 min de lecture (150 mots) pour 10 min de vidéo (≈ 1 500 mots), sans plafond, minimum 3 min
-    mots = LONGUEURS.get(a.duree) or max(450, int(total_mots * 0.10))
+    # auto : ≈ 1 min de lecture (150 mots) pour 10 min de vidéo, sans plafond ; minimum 8 min dès 20 min de vidéo (format live), 3 min sinon
+    mots = LONGUEURS.get(a.duree) or max(1200 if total_mots >= 3000 else 450, int(total_mots * 0.10))
     if a.duree not in LONGUEURS:
         mots = min(mots, max(150, int(total_mots * 0.8)))   # jamais plus long que la matière
     log(f"Longueur visée : ~{mots} mots ≈ {round(mots / 150)} min de lecture")
