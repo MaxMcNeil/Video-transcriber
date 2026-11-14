@@ -224,7 +224,8 @@ Repère les phrases du TEXTE qui doivent être supprimées :
 2. nom ou étiquette d'intervenant, format dialogue ou questions-réponses d'interview ;
 3. mention d'interview, d'invité, de vidéo, de source, d'article, d'extrait, de chaîne d'origine, de transcription, de licence ou de crédits ;
 4. reste de musique, chanson, jingle, générique ou publicité ;
-5. répétition d'une phrase déjà dite.
+5. répétition d'une phrase déjà dite ;
+6. jour, date ou heure d'un prochain live (toujours inventés).
 L'humour, les exagérations comiques, les opinions et les accusations ou soupçons présents dans la fiche sont NORMAUX : ne les signale pas.
 
 Réponds UNIQUEMENT avec les phrases à supprimer, copiées mot pour mot, une par ligne.
@@ -316,7 +317,7 @@ STRUCTURE D'UN LIVE YOUTUBE (rétention maximale ; les spectateurs arrivent en c
 3. UN SEGMENT PAR RÉVÉLATION, dans cet ordre « démarrer fort, finir encore plus fort » : D'ABORD la 2e révélation la plus explosive (pour accrocher tout de suite), PUIS les autres en montée d'intensité, et la BOMBE (la plus grave) seulement À LA FIN. Aucun segment faible au début. Chaque segment : mini-hook d'ouverture, les faits, le DÉCRYPTAGE STRATÉGIQUE (qui gagne, qui perd, ce que chaque acteur cherche vraiment, le rapport de force caché), une punchline d'humour noir, puis UNE question précise au chat (« Dites-moi dans le chat : … »). Une relance toutes les 4 à 6 phrases.
 4. Environ toutes les 8 minutes de lecture (≈ 1 200 mots), un RÉCAP de 2 phrases pour ceux qui arrivent (« Pour ceux qui nous rejoignent : … ») suivi d'un rappel like/partage, sans casser le rythme. Au milieu exact du texte, l'appel au like doit être drôle et percutant.
 5. Avant la chute : LE SCÉNARIO DE LA SUITE, présenté clairement comme mon analyse (« mon pari », « le scénario le plus probable », « si rien ne change ») et jamais comme un fait, suivi d'un SONDAGE ORAL : « Tapez 1 dans le chat si…, tapez 2 si… ».
-6. La CHUTE : la bombe promise depuis le début (la révélation la plus grave), une punchline finale, un appel à s'abonner{chaine_cta} avec la cloche, l'annonce du prochain live, puis UNE question finale pour les commentaires. Rien après.
+6. La CHUTE : la bombe promise depuis le début (la révélation la plus grave), une punchline finale, un appel à s'abonner{chaine_cta} avec la cloche, l'annonce du prochain live SANS JAMAIS donner de jour, de date ni d'heure (« rendez-vous au prochain live, activez la cloche pour ne pas le rater »), puis UNE question finale pour les commentaires. Rien après.
 - Ne garde que le contenu FORT : ce qui choque, indigne, inquiète ou fait rire jaune. Écarte les détails secondaires ou techniques qui feraient décrocher.
 STYLE
 - Oral, vivant, comme si j'improvisais. Phrases courtes (20 mots maximum), quelques phrases d'un seul mot.
@@ -706,6 +707,82 @@ N'ajoute aucun fait absent de la FICHE. Texte brut, un paragraphe par idée."""
     return "\n\n".join(corps + chute) + "\n"
 
 
+JOURS = (r"lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche|demain|ce soir à|monday|tuesday|wednesday|thursday|friday"
+         r"|saturday|sunday|tomorrow|lunedì|martedì|mercoledì|giovedì|venerdì|sabato|domenica|domani"
+         r"|الاثنين|الثلاثاء|الأربعاء|الخميس|الجمعة|السبت|الأحد|غدا|غداً")
+PROCHAIN_LIVE = {
+    "fr": "Rendez-vous au prochain live : activez la cloche pour ne pas le rater.",
+    "ar": "موعدنا في البث المباشر القادم، فعّلوا الجرس حتى لا يفوتكم.",
+    "it": "Ci vediamo alla prossima diretta: attivate la campanella per non perderla.",
+    "en": "See you at the next live: hit the bell so you don't miss it.",
+}
+
+
+def sans_date_inventee(texte, langue):
+    """Remplace toute annonce de prochain live avec jour/heure (inventés par l'IA) par une formule neutre."""
+    paras = texte.strip().split("\n\n")
+    for i in range(max(0, len(paras) - 8), len(paras)):
+        phrases = re.split(r"(?<=[.!?…؟])\s+", paras[i])
+        nouv = []
+        for ph in phrases:
+            parle_live = re.search(r"\blive\b|direct|diretta|بث|مباشر|rendez-vous|rejoignez|appuntamento|join us", ph, re.I)
+            date = re.search(JOURS, ph, re.I) or re.search(r"\b\d{1,2}\s?(h|heures?|o'?clock|pm|am|ore)\b|الساعة", ph, re.I)
+            if parle_live and date:
+                nouv.append(PROCHAIN_LIVE.get(langue, PROCHAIN_LIVE["fr"]))
+            else:
+                nouv.append(ph)
+        paras[i] = " ".join(nouv)
+    return "\n\n".join(paras) + "\n"
+
+
+def sans_debris(texte):
+    """Retire les paragraphes réduits à un mot sans ponctuation (débris d'IA, ex. « Plus »)."""
+    garde = []
+    for p in texte.strip().split("\n\n"):
+        p = p.strip()
+        if len(p.split()) == 1 and not re.search(r"[.!?…؟»\"”]$", p):
+            continue                                   # paragraphe réduit à un mot
+        p = re.sub(r"(?<=[.!?…؟])\s+\S+$", "", p) if not re.search(r"[.!?…؟»\"”:]$", p) else p   # mot isolé en fin
+        garde.append(p)
+    return "\n\n".join(garde) + "\n"
+
+
+def corriger_coquilles(srv, conf, texte, langue):
+    """L'IA liste seulement les phrases à mots tronqués/collés ; on remplace ces phrases, rien d'autre."""
+    msg = f"""Voici un texte de prompteur en {LANGUE[langue]}. Repère UNIQUEMENT les coquilles évidentes :
+mot tronqué ou collé (ex. « tousux » au lieu de « tous ceux »), mot manquant qui rend la phrase incompréhensible
+(ex. « C me imposture » au lieu de « C'est une imposture »), phrase coupée au milieu.
+Pour chacune, une ligne exactement au format :
+AVANT: <la phrase fautive copiée mot pour mot> || APRÈS: <la même phrase corrigée, sans rien changer d'autre>
+Ne touche ni au style, ni au fond, ni à la ponctuation volontaire. S'il n'y a aucune coquille, réponds : AUCUNE
+
+TEXTE :
+{texte}"""
+    try:
+        r, _ = srv.chat(SYS_EXTRACTION, [{"role": "user", "content": msg}], 1200, conf["extraction"])
+    except Exception as e:
+        avertir(f"Correction des coquilles impossible ({e}).")
+        return texte
+    n = 0
+    for ligne in r.splitlines():
+        m = re.match(r"\s*[-*]?\s*AVANT\s*:\s*(.+?)\s*\|\|\s*APR[ÈE]S\s*:\s*(.+?)\s*$", ligne)
+        if not m or n >= 15:
+            continue
+        avant, apres = m.group(1).strip().strip("«»\"“”"), m.group(2).strip().strip("«»\"“”")
+        if len(avant) < 4 or avant == apres or avant not in texte:
+            continue
+        if not 0.6 <= len(apres) / len(avant) <= 1.6:      # pas de réécriture déguisée
+            continue
+        texte = texte.replace(avant, apres, 1)
+        n += 1
+    log(f"Coquilles corrigées : {n}")
+    return texte
+
+
+def polir(srv, conf, texte, langue):
+    return dedoublonner(sans_date_inventee(sans_debris(corriger_coquilles(srv, conf, texte, langue)), langue))
+
+
 def finaliser(srv, conf, texte, fiche):
     # 4) nettoyage, dédoublonnage, relecture contre la fiche (préfixe en cache)
     texte = dedoublonner(nettoyer(texte))
@@ -865,6 +942,7 @@ def main():
             if compter_mots(texte) < mots * 0.75:
                 texte = developper(api, conf_api, texte, fiche, langue, mots) if mots <= 3000 else \
                     completer(api, conf_api, texte, fiche, langue, mots)
+            texte = polir(api, conf_api, texte, langue)
             n = compter_mots(texte)
             if n >= mots * 0.35:
                 publier(texte, api.nom)
@@ -909,7 +987,7 @@ def main():
                 if n > compter_mots(meilleur[0]):
                     meilleur = (texte, nom_ia)
                 if n >= mots * 0.35:
-                    publier(vers_langue(srv, conf, texte), nom_ia)
+                    publier(polir(srv, conf, vers_langue(srv, conf, texte), langue), nom_ia)
                     return
                 avertir(f"Texte trop court ({n} mots pour ~{mots}).")
             dernier_err = RuntimeError(f"{nom_ia} n'a pas produit de texte satisfaisant")
