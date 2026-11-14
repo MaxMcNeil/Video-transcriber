@@ -1,4 +1,4 @@
-name: Transcribe
+name: Transcription + Prompteur
 
 on:
   workflow_dispatch:

@@ -23,7 +23,7 @@ Transcription 100 % locale d'une ou plusieurs vidéos/audios (2 min à plusieurs
 
 ### 2. Fichier vidéo, ou lien non YouTube (Drive, X, Telegram…) → depuis GitHub
 1. (Pour un fichier) **Releases → videos → Edit** → ajoute le fichier → **Update release**.
-2. **Actions → Transcribe → Run workflow**.
+2. **Actions → Transcription + Prompteur → Run workflow**.
 3. Champ **source** : laisse **VIDE**. Le workflow prend tout seul **toutes les vidéos nouvelles** de la Release (jamais transcrites), ensemble dans un seul texte. S'il n'y a rien de nouveau, il reprend le **dernier lot déposé**.
    - Pour un lien non YouTube : colle-le dans source (plusieurs : sépare par **`;`**).
    - `tout` = toute la Release, même déjà transcrite.
@@ -37,7 +37,7 @@ Transcription 100 % locale d'une ou plusieurs vidéos/audios (2 min à plusieurs
 
 ### 4. Refaire seulement le texte prompteur (sans retranscrire)
 Autre langue, autre longueur, ou run coupé avant le prompteur :
-**Actions → Prompteur seul → Run workflow** → laisse **transcription** vide (= la plus récente), choisis la **langue** → Run.
+**Actions → Refaire le prompteur (sans retranscrire) → Run workflow** → laisse **transcription** vide (= la plus récente), choisis la **langue** → Run.
 Environ 30 à 60 min, quelle que soit la durée des vidéos (les fiches sont préparées sur 4 serveurs en parallèle).
 
 ### 5. IA en ligne gratuites (optionnel, recommandé pour l'arabe)
@@ -52,7 +52,7 @@ Désactiver pour un run : champ **en_ligne** = `non`.
 ---
 
 ## Utilisation
-Actions → **Transcribe** → Run workflow :
+Actions → **Transcription + Prompteur** → Run workflow :
 
 | Champ | Valeurs |
 |---|---|

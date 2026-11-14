@@ -1,4 +1,4 @@
-name: Prompteur seul
+name: Refaire le prompteur (sans retranscrire)
 
 # Refait le texte prompteur à partir d'une transcription déjà publiée,
 # sans retranscrire (autre langue, autre longueur, run précédent coupé…).

@@ -121,5 +121,5 @@ for essai in 1 2 3; do
   exit 0
 done
 echo "❌ GitHub refuse de démarrer le run après 3 essais. Réessaie plus tard (les fichiers sont déjà dans la Release 'videos' :"
-echo "   lance « Transcribe » depuis Actions avec source = $liste)"
+echo "   lance « Transcription + Prompteur » depuis Actions avec source = $liste)"
 exit 1
