@@ -13,9 +13,9 @@ on:
         options: [auto, fr, ar, it, en, non]
         default: auto
       duree_prompteur:
-        description: "Longueur du texte prompteur (auto ≈ selon la matière ; court ≈ 3 min, moyen ≈ 6 min, long ≈ 10 min)"
+        description: "Longueur du prompteur (auto ≈ 1 min de lecture pour 10 min de vidéo, de 3 à 15 min ; court 3 min, moyen 6, long 10, tres-long 15)"
         type: choice
-        options: [auto, court, moyen, long]
+        options: [auto, court, moyen, long, tres-long]
         default: auto
       ia:
         description: "IA locale qui écrit le prompteur (l'autre sert de secours)"

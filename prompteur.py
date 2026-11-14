@@ -28,7 +28,7 @@ LANGUE = {
     "en": "anglais",
     "ar": "arabe standard moderne (فصحى), fluide et oral",
 }
-LONGUEURS = {"court": 450, "moyen": 900, "long": 1500}
+LONGUEURS = {"court": 450, "moyen": 900, "long": 1500, "tres-long": 2250}
 REFUS = re.compile(
     r"je ne (peux|suis pas en mesure)|je suis désolé|i can(no|')t (help|assist|write|provide)"
     r"|i'm sorry|as an ai|en tant qu'(ia|intelligence)|non posso|mi dispiace|لا أستطيع|عذرًا|عذراً",
@@ -654,6 +654,24 @@ def ecrire(srv, conf, fiche, meta, langue, mots, chaine, citation=None):
     return texte
 
 
+def developper(srv, conf, texte, fiche, langue, mots):
+    """Texte trop court : réécriture complète plus longue, à partir de la fiche, sans nouveaux faits."""
+    n = compter_mots(texte)
+    log(f"Texte trop court ({n} mots pour ~{mots}) : développement demandé.")
+    msg = f"""{bloc_matiere(fiche)}Voici mon texte de prompteur, en {LANGUE[langue]}. Il fait environ {n} mots : c'est trop court.
+Réécris-le EN ENTIER en environ {mots} mots, même langue, même ton, même structure (hook, promesse, blocs, appel au like au milieu, scénario de la suite, chute).
+Développe le décryptage stratégique, les conséquences concrètes, les relances et l'humour noir, en t'appuyant UNIQUEMENT sur la FICHE ci-dessus : n'ajoute aucun fait, nom, chiffre ou date.
+Texte brut, un paragraphe par idée, une ligne vide entre les paragraphes.
+
+TEXTE :
+{texte}"""
+    tpw = 2.6 if langue == "ar" else 1.8
+    r, _ = srv.chat(SYS_ECRITURE, [{"role": "user", "content": msg}], min(int(mots * tpw * 1.3) + 300, 7000),
+                    conf["ecriture"])
+    r = dedoublonner(nettoyer(r))
+    return r if compter_mots(r) > n and not REFUS.search(r[:400]) else texte
+
+
 def finaliser(srv, conf, texte, fiche):
     # 4) nettoyage, dédoublonnage, relecture contre la fiche (préfixe en cache)
     texte = dedoublonner(nettoyer(texte))
@@ -703,9 +721,11 @@ def main():
                 poids[s["langue"]] = poids.get(s["langue"], 0) + s["mots"]
         langue = max(poids, key=poids.get) if poids else "fr"
     total_mots = sum(s["mots"] for s in meta["sources"])
-    mots = LONGUEURS.get(a.duree) or min(900, max(250, int(total_mots * 0.25)))
+    # auto : ≈ 1 min de lecture (150 mots) pour 10 min de vidéo (≈ 1 500 mots), entre 3 et 15 min
+    mots = LONGUEURS.get(a.duree) or min(2250, max(450, int(total_mots * 0.10)))
     if a.duree not in LONGUEURS:
-        mots = min(mots, max(150, total_mots))      # jamais plus long que la matière
+        mots = min(mots, max(150, int(total_mots * 0.8)))   # jamais plus long que la matière
+    log(f"Longueur visée : ~{mots} mots ≈ {round(mots / 150)} min de lecture")
     chaine = config["chaines"].get(langue, "")
     # Langue de TRAVAIL de l'IA : anglais pour les langues qu'elle écrit mal (fiche + texte),
     # puis traduction finale ; doit être identique dans tous les jobs (fiches en parallèle).
@@ -808,6 +828,8 @@ def main():
                 avertir(f"{api.nom} a refusé d'écrire.")
                 continue
             texte = finaliser(api, conf_api, brut, fiche)
+            if compter_mots(texte) < mots * 0.75:
+                texte = developper(api, conf_api, texte, fiche, langue, mots)
             n = compter_mots(texte)
             if n >= mots * 0.35:
                 publier(texte, api.nom)
@@ -845,6 +867,8 @@ def main():
                     avertir(f"{nom_ia} a refusé d'écrire (essai {essai + 1}).")
                     continue
                 texte = finaliser(srv, conf, brut, fiche)
+                if compter_mots(texte) < mots * 0.75 and reste_min() > 45:
+                    texte = developper(srv, conf, texte, fiche, travail, mots)
                 n = compter_mots(texte)
                 if n > compter_mots(meilleur[0]):
                     meilleur = (texte, nom_ia)

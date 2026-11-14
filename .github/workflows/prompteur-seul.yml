@@ -15,9 +15,9 @@ on:
         options: [auto, ar, fr, it, en]
         default: auto
       duree:
-        description: "Longueur (auto ≈ selon la matière ; court ≈ 3 min, moyen ≈ 6 min, long ≈ 10 min)"
+        description: "Longueur (auto ≈ 1 min de lecture pour 10 min de vidéo, de 3 à 15 min ; court 3 min, moyen 6, long 10, tres-long 15)"
         type: choice
-        options: [auto, court, moyen, long]
+        options: [auto, court, moyen, long, tres-long]
         default: auto
       ia:
         description: "IA locale (l'autre sert de secours)"
