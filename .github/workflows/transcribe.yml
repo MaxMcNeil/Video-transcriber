@@ -22,6 +22,11 @@ on:
         type: choice
         options: [qwen3-8b, mistral-nemo-12b]
         default: qwen3-8b
+      en_ligne:
+        description: "IA en ligne gratuite pour l'écriture (auto = Gemini puis Groq si clés présentes, sinon IA locale)"
+        type: choice
+        options: [auto, non]
+        default: auto
       translate:
         description: "Traduire aussi la transcription complète en (non = pas de traduction)"
         type: choice
@@ -229,5 +234,7 @@ jobs:
       langue: ${{ inputs.prompteur }}
       duree: ${{ inputs.duree_prompteur }}
       ia: ${{ inputs.ia }}
+      en_ligne: ${{ inputs.en_ligne }}
+    secrets: inherit
     permissions:
       contents: write

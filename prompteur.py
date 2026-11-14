@@ -498,7 +498,7 @@ def extraire_fiches(srv, conf, meta, langue, work="work", part=None, parts=1):
             f.write(r)
 
 
-def preparer_fiche(srv, conf, meta, langue, work="work"):
+def preparer_fiche(srv, conf, meta, langue, work="work", limite_fusion=9000):
     # 1) une FICHE par morceau (déjà faites en parallèle si le workflow l'a permis)
     extraire_fiches(srv, conf, meta, langue, work)
     fiches = []
@@ -514,7 +514,7 @@ def preparer_fiche(srv, conf, meta, langue, work="work"):
     while len(fiches) > 1:
         groupes, cur = [], []
         for f_ in fiches:
-            if cur and tokens_estimes("\n\n".join(cur + [f_]), langue) > 9000:
+            if cur and tokens_estimes("\n\n".join(cur + [f_]), langue) > limite_fusion:
                 groupes.append(cur)
                 cur = []
             cur.append(f_)
@@ -679,6 +679,8 @@ def main():
     p.add_argument("--out", default="out")
     p.add_argument("--etape", default="tout", choices=["tout", "fiches", "compter"],
                    help="fiches = seulement les fiches de la part --part sur --parts (travail parallèle)")
+    p.add_argument("--en-ligne", default="auto", choices=["auto", "non"],
+                   help="auto = Gemini puis Groq si les clés sont présentes, puis IA locale ; non = IA locale seule")
     p.add_argument("--part", type=int, default=0)
     p.add_argument("--parts", type=int, default=1)
     a = p.parse_args()
@@ -778,6 +780,50 @@ def main():
         return dedoublonner(nettoyer(traduire_texte(srv, conf, texte, langue)))
 
     fiche, citation, cit_travail, meilleur, dernier_err = None, None, None, ("", ""), None
+
+    # ── 1) IA en ligne gratuites (Gemini puis Groq), si des clés sont configurées ──
+    #    Elles écrivent directement dans la langue demandée (arabe compris).
+    #    Quota dépassé, panne ou refus : on passe à la suivante, puis à l'IA locale.
+    apis = []
+    if a.en_ligne != "non":
+        from moteurs_api import moteurs_disponibles
+        apis = moteurs_disponibles()
+        if not apis:
+            log("IA en ligne : aucune clé utilisable, IA locale seule.")
+    manquantes = [g for g, *_ in lister_morceaux(meta) if not os.path.exists(chemin_fiche(a.work, g))]
+    conf_api = {"extraction": {"temperature": 0.2, "top_p": 0.9}, "ecriture": {"temperature": 0.8, "top_p": 0.95}}
+    for api in apis:
+        if manquantes and api.contexte < 20000:
+            log(f"{api.nom} : fiches incomplètes et contexte trop petit, ignoré.")
+            continue
+        try:
+            log(f"── IA en ligne : {api.nom}")
+            if fiche is None:
+                fiche = preparer_fiche(api, conf_api, meta, travail, a.work, limite_fusion=api.contexte)
+                manquantes = []
+            if citation is None:
+                citation = choisir_citation(api, conf_api, fiche, langue, meta["prefixe"])
+            brut = ecrire(api, conf_api, fiche, meta, langue, mots, chaine, citation)
+            if REFUS.search(brut[:400]):
+                avertir(f"{api.nom} a refusé d'écrire.")
+                continue
+            texte = finaliser(api, conf_api, brut, fiche)
+            n = compter_mots(texte)
+            if n >= mots * 0.35:
+                publier(texte, api.nom)
+                return
+            if n > compter_mots(meilleur[0]):
+                meilleur = (texte, api.nom)
+            avertir(f"{api.nom} : texte trop court ({n} mots pour ~{mots}).")
+        except Exception as e:
+            dernier_err = e
+            avertir(f"IA en ligne {api.nom} : {str(e)[:200]} — on passe à la suite.")
+    if apis:
+        log("Bascule sur l'IA locale.")
+    if citation is not None and len(citation) < 4:
+        citation = None
+
+    # ── 2) IA locale (llama.cpp) ──
     for nom_ia in ordre[:2]:
         conf = config["ia"][nom_ia]
         srv = None
@@ -787,8 +833,9 @@ def main():
             srv.demarrer()
             if fiche is None:
                 fiche = preparer_fiche(srv, conf, meta, travail, a.work)   # calculée une seule fois
+            if citation is None:
                 citation = choisir_citation(srv, conf, fiche, langue, meta["prefixe"])
-                cit_travail = (citation[3][travail] + (citation[2],)) if citation else None
+            cit_travail = (citation[3][travail] + (citation[2],)) if citation else None
             for essai in range(2):
                 if essai and reste_min() < 25:
                     avertir("Temps insuffisant pour un nouvel essai.")
@@ -819,7 +866,7 @@ def main():
             log("Bascule sur l'autre IA locale.")
     if meilleur[0].strip():
         texte = meilleur[0]
-        if travail != langue:                          # traduire aussi le texte de secours
+        if travail != langue and meilleur[1] in config["ia"]:   # texte local : le traduire aussi
             conf = config["ia"][meilleur[1]]
             srv = None
             try:

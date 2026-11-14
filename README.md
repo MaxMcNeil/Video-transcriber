@@ -40,7 +40,12 @@ Autre langue, autre longueur, ou run coupé avant le prompteur :
 **Actions → Prompteur seul → Run workflow** → laisse **transcription** vide (= la plus récente), choisis la **langue** → Run.
 Environ 30 à 60 min, quelle que soit la durée des vidéos (les fiches sont préparées sur 4 serveurs en parallèle).
 
-### 5. Si le run est rouge
+### 5. IA en ligne gratuites (optionnel, recommandé pour l'arabe)
+Si les secrets `GEMINI_API_KEY` et/ou `GROQ_API_KEY` existent, l'écriture finale du prompteur est confiée à **Gemini** (puis **Groq** si le quota Gemini est épuisé), qui écrivent bien mieux, surtout en arabe. Sinon, ou en cas de panne, l'IA locale prend le relais automatiquement : un run ne reste jamais bloqué.
+Ajouter / remplacer une clé (dans Termux) : `gh secret set GEMINI_API_KEY -R MaxMcNeil/Video-transcriber` (même chose avec `GROQ_API_KEY`).
+Désactiver pour un run : champ **en_ligne** = `non`.
+
+### 6. Si le run est rouge
 - Rouge **sans aucune étape** (« startup failure ») → ouvre le run → **Re-run all jobs**.
 - Rouge sur une étape → envoie-moi la capture ou le lien du run.
 

@@ -14,6 +14,14 @@ on:
       ia:
         type: string
         default: qwen3-8b
+      en_ligne:
+        type: string
+        default: auto
+    secrets:
+      GEMINI_API_KEY:
+        required: false
+      GROQ_API_KEY:
+        required: false
 
 permissions:
   contents: write
@@ -125,11 +133,14 @@ jobs:
           LANGUE: ${{ inputs.langue }}
           DUREE: ${{ inputs.duree }}
           IA: ${{ inputs.ia }}
+          EN_LIGNE: ${{ inputs.en_ligne }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           PROMPTEUR_LIMITE_MIN: "300"
         run: |
           mkdir -p out work/fiches
           echo "Fiches déjà prêtes : $(ls work/fiches | wc -l)"
-          python prompteur.py --langue "$LANGUE" --duree "$DUREE" --ia "$IA"
+          python prompteur.py --langue "$LANGUE" --duree "$DUREE" --ia "$IA" --en-ligne "$EN_LIGNE"
 
       - name: Artefact
         if: always() && hashFiles('out/*_prompteur*.txt', 'out/*_fiche.txt') != ''
