@@ -644,11 +644,13 @@ def ecrire(srv, conf, fiche, meta, langue, mots, chaine, citation=None):
     log(f"Écriture du texte prompteur (~{mots} mots, {LANGUE[langue].split(' (')[0]})…")
     texte, fin = srv.chat(SYS_ECRITURE, msgs, max_sortie, conf["ecriture"])
     suites = 0
-    while fin == "length" and suites < 2:
+    max_suites = 2 + int(mots * tpw / max_sortie)        # textes longs : écrits en plusieurs morceaux
+    while fin == "length" and suites < max_suites:
         suites += 1
         log("Texte coupé par la limite : suite demandée.")
         msgs += [{"role": "assistant", "content": texte},
-                 {"role": "user", "content": "Continue exactement là où tu t'es arrêté, même style et même format, jusqu'à la chute finale."}]
+                 {"role": "user", "content": f"Continue exactement là où tu t'es arrêté, même style et même format, sans rien répéter. "
+                                             f"Le texte complet doit faire environ {mots} mots (déjà environ {compter_mots(texte)}), jusqu'à la chute finale."}]
         suite, fin = srv.chat(SYS_ECRITURE, msgs, max_sortie, conf["ecriture"])
         texte = texte.rstrip() + "\n\n" + suite.lstrip()
     return texte
@@ -670,6 +672,35 @@ TEXTE :
                     conf["ecriture"])
     r = dedoublonner(nettoyer(r))
     return r if compter_mots(r) > n and not REFUS.search(r[:400]) else texte
+
+
+def completer(srv, conf, texte, fiche, langue, mots):
+    """Texte long trop court : on AJOUTE des blocs avant la chute, par morceaux, sans tout réécrire."""
+    paras = texte.strip().split("\n\n")
+    corps, chute = paras[:-3], paras[-3:]                 # garde la chute (scénario, question, abonnement) à la fin
+    for tour in range(6):
+        manque = mots - compter_mots("\n\n".join(corps + chute))
+        if manque < mots * 0.1:
+            break
+        log(f"Texte long : ajout de nouveaux blocs ({compter_mots(' '.join(corps + chute))}/{mots} mots).")
+        msg = f"""{bloc_matiere(fiche)}Voici le début de mon texte de prompteur, en {LANGUE[langue]} :
+
+{chr(10).join(corps[-12:])}
+
+Écris la SUITE : environ {min(manque, 1200)} mots de nouveaux blocs, même langue, même ton, avec relances et humour noir,
+sur des aspects de la FICHE pas encore traités. Ne répète rien de ce qui précède, n'écris pas de conclusion.
+N'ajoute aucun fait absent de la FICHE. Texte brut, un paragraphe par idée."""
+        tpw = 2.6 if langue == "ar" else 1.8
+        r, _ = srv.chat(SYS_ECRITURE, [{"role": "user", "content": msg}], min(int(min(manque, 1200) * tpw * 1.3) + 300, 7000),
+                        conf["ecriture"])
+        ajout = dedoublonner(nettoyer(r)).strip()
+        if not ajout or REFUS.search(ajout[:300]):
+            break
+        avant = compter_mots("\n\n".join(corps))
+        corps = dedoublonner("\n\n".join(corps + ajout.split("\n\n"))).strip().split("\n\n")
+        if compter_mots("\n\n".join(corps)) <= avant + 30:
+            break                                          # plus rien de nouveau à dire
+    return "\n\n".join(corps + chute) + "\n"
 
 
 def finaliser(srv, conf, texte, fiche):
@@ -721,8 +752,8 @@ def main():
                 poids[s["langue"]] = poids.get(s["langue"], 0) + s["mots"]
         langue = max(poids, key=poids.get) if poids else "fr"
     total_mots = sum(s["mots"] for s in meta["sources"])
-    # auto : ≈ 1 min de lecture (150 mots) pour 10 min de vidéo (≈ 1 500 mots), entre 3 et 15 min
-    mots = LONGUEURS.get(a.duree) or min(2250, max(450, int(total_mots * 0.10)))
+    # auto : ≈ 1 min de lecture (150 mots) pour 10 min de vidéo (≈ 1 500 mots), sans plafond, minimum 3 min
+    mots = LONGUEURS.get(a.duree) or max(450, int(total_mots * 0.10))
     if a.duree not in LONGUEURS:
         mots = min(mots, max(150, int(total_mots * 0.8)))   # jamais plus long que la matière
     log(f"Longueur visée : ~{mots} mots ≈ {round(mots / 150)} min de lecture")
@@ -829,7 +860,8 @@ def main():
                 continue
             texte = finaliser(api, conf_api, brut, fiche)
             if compter_mots(texte) < mots * 0.75:
-                texte = developper(api, conf_api, texte, fiche, langue, mots)
+                texte = developper(api, conf_api, texte, fiche, langue, mots) if mots <= 3000 else \
+                    completer(api, conf_api, texte, fiche, langue, mots)
             n = compter_mots(texte)
             if n >= mots * 0.35:
                 publier(texte, api.nom)
@@ -868,7 +900,8 @@ def main():
                     continue
                 texte = finaliser(srv, conf, brut, fiche)
                 if compter_mots(texte) < mots * 0.75 and reste_min() > 45:
-                    texte = developper(srv, conf, texte, fiche, travail, mots)
+                    texte = developper(srv, conf, texte, fiche, travail, mots) if mots <= 3000 else \
+                        completer(srv, conf, texte, fiche, travail, mots)
                 n = compter_mots(texte)
                 if n > compter_mots(meilleur[0]):
                     meilleur = (texte, nom_ia)
