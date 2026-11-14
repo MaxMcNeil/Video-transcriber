@@ -188,7 +188,7 @@ FAITS : les faits essentiels, avec noms, lieux, dates et chiffres EXACTS tels qu
 CITATIONS : les déclarations les plus percutantes, presque mot pour mot, avec qui les a dites.
 SOUPÇONS : accusations, soupçons et rumeurs évoqués, avec qui les porte.
 ABSURDITÉS : contradictions, hypocrisies, détails ridicules DU SUJET à moquer (jamais les erreurs de transcription).
-RÉVÉLATIONS : les 3 à 5 éléments les plus explosifs pour le public, classés du moins grave au PLUS grave (le dernier = la bombe du live)."""
+RÉVÉLATIONS : les 3 à 5 éléments les plus explosifs pour le public, classés du moins grave au PLUS grave (le dernier = la bombe du live, l'avant-dernier = l'ouverture du live)."""
 
 
 def prompt_fiche(texte, titre, k, n, langue):
@@ -311,12 +311,12 @@ QUI PARLE
 
 STRUCTURE D'UN LIVE YOUTUBE (rétention maximale ; les spectateurs arrivent en cours de route)
 {f"0. Le texte s'ouvrira sur cette citation, déjà écrite automatiquement (NE LA RÉÉCRIS PAS) : « {citation[0]} » — {citation[1]}. Ta toute première phrase rebondit dessus pour lancer le hook." if citation else ""}
-1. COLD OPEN, 30 secondes : HOOK ULTRA-CHOC de 2 à 4 phrases construit sur l'ANGLE, le fait le plus alarmant ou scandaleux, une conséquence directe pour le public. Indignation et inquiétude immédiates. Jamais de « bonjour » avant le hook.
-2. Salutation très courte, puis la PROMESSE en compte à rebours, basée sur les RÉVÉLATIONS de la fiche : « Ce soir, X révélations. La dernière est la plus grave. » Et tout de suite : « Partagez ce live maintenant à ceux qui doivent l'entendre. »
-3. UN SEGMENT PAR RÉVÉLATION, du moins grave au plus grave (la bombe à la fin). Chaque segment : mini-hook d'ouverture, les faits, le DÉCRYPTAGE STRATÉGIQUE (qui gagne, qui perd, ce que chaque acteur cherche vraiment, le rapport de force caché), une punchline d'humour noir, puis UNE question précise au chat (« Dites-moi dans le chat : … »). Une relance toutes les 4 à 6 phrases.
+1. COLD OPEN, 30 secondes : HOOK ULTRA-CHOC de 2 à 4 phrases construit sur l'ANGLE, le fait le plus alarmant ou scandaleux, une conséquence directe pour le public. Indignation et inquiétude immédiates. Termine par un TEASER de la bombe finale (la révélation la plus grave) sans la dévoiler : « Et ce que je vais vous révéler à la fin est encore pire. » Jamais de « bonjour » avant le hook.
+2. Salutation très courte, puis la PROMESSE : « Ce soir, X révélations. La dernière va vous glacer le sang. » Et tout de suite : « Partagez ce live maintenant à ceux qui doivent l'entendre. »
+3. UN SEGMENT PAR RÉVÉLATION, dans cet ordre « démarrer fort, finir encore plus fort » : D'ABORD la 2e révélation la plus explosive (pour accrocher tout de suite), PUIS les autres en montée d'intensité, et la BOMBE (la plus grave) seulement À LA FIN. Aucun segment faible au début. Chaque segment : mini-hook d'ouverture, les faits, le DÉCRYPTAGE STRATÉGIQUE (qui gagne, qui perd, ce que chaque acteur cherche vraiment, le rapport de force caché), une punchline d'humour noir, puis UNE question précise au chat (« Dites-moi dans le chat : … »). Une relance toutes les 4 à 6 phrases.
 4. Environ toutes les 8 minutes de lecture (≈ 1 200 mots), un RÉCAP de 2 phrases pour ceux qui arrivent (« Pour ceux qui nous rejoignent : … ») suivi d'un rappel like/partage, sans casser le rythme. Au milieu exact du texte, l'appel au like doit être drôle et percutant.
 5. Avant la chute : LE SCÉNARIO DE LA SUITE, présenté clairement comme mon analyse (« mon pari », « le scénario le plus probable », « si rien ne change ») et jamais comme un fait, suivi d'un SONDAGE ORAL : « Tapez 1 dans le chat si…, tapez 2 si… ».
-6. La CHUTE : la révélation la plus grave tenue jusqu'ici, une punchline finale, un appel à s'abonner{chaine_cta} avec la cloche, l'annonce du prochain live, puis UNE question finale pour les commentaires. Rien après.
+6. La CHUTE : la bombe promise depuis le début (la révélation la plus grave), une punchline finale, un appel à s'abonner{chaine_cta} avec la cloche, l'annonce du prochain live, puis UNE question finale pour les commentaires. Rien après.
 - Ne garde que le contenu FORT : ce qui choque, indigne, inquiète ou fait rire jaune. Écarte les détails secondaires ou techniques qui feraient décrocher.
 STYLE
 - Oral, vivant, comme si j'improvisais. Phrases courtes (20 mots maximum), quelques phrases d'un seul mot.
