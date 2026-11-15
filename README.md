@@ -8,7 +8,14 @@ Transcription 100 % locale d'une ou plusieurs vidéos/audios (2 min à plusieurs
 
 ### 1. Vidéo YouTube → depuis le téléphone
 1. Dans l'appli **YouTube**, ouvre la vidéo → **Partager** → **Termux**.
-2. Termux affiche la **liste des vidéos en attente**, puis :
+2. **1er lien partagé** : Termux demande d'abord quoi en faire :
+   - **Entrée** → 📝 **transcription** (comme d'habitude, suite ci-dessous) ;
+   - **`c` + Entrée** → 🎙 **vidéo à commenter** : Termux demande la langue de TON script (Entrée = fr) et la durée de
+     ton commentaire (Entrée = 15 min), télécharge la vidéo (720p), la dépose dans ton Drive **`montage-joints`** et
+     lance le **prompteur en mode « commentaire d'une vidéo »** (dépôt OSINT-teleprompter-) sur CETTE vidéo. Script
+     prêt en ≈ 5 à 10 min dans `prompter/` ; la vidéo reste dans `montage-joints` pour le fond vert et le Montage
+     (mode « commentaire d'une vidéo »). Marche avec YouTube, TikTok, X, Instagram…
+   Termux affiche ensuite la **liste des vidéos en attente**, puis :
    - **Entrée** quand tu as fini (ou 20 secondes sans rien faire) → Termux te **demande la langue du texte prompteur** :
      tape **`ar`**, **`fr`**, **`it`** ou **`en`** puis Entrée (Entrée seule = langue majoritaire des vidéos), et c'est lancé ;
    - **`a` + Entrée** → garde la vidéo et attend la suivante : retourne sur YouTube et partage la vidéo suivante ;

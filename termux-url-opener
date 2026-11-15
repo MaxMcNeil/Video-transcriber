@@ -27,6 +27,106 @@ if [ ${#trouves[@]} -eq 0 ]; then
   read -r -t 15 _ || true
   exit 0
 fi
+# ---------------------------------------------------------------------------------------------------------------------
+# 1er lien partagé (liste vide) : on demande d'abord QUOI en faire — transcription (comme avant) ou vidéo à commenter
+# ---------------------------------------------------------------------------------------------------------------------
+commenter() {   # $1 = lien de la vidéo à commenter
+  local url="$1" rem nom titre langue duree avant id i
+  local OSINT="MaxMcNeil/OSINT-teleprompter-" JOINTS="montage-joints" W="$HOME/.commentaire"
+  clear 2>/dev/null || true
+  echo "🎙  VIDÉO À COMMENTER"
+  echo "   $url"
+  echo
+  # outils (une seule fois)
+  local manque=()
+  command -v ffmpeg >/dev/null || manque+=(ffmpeg)
+  command -v rclone >/dev/null || manque+=(rclone)
+  command -v gh >/dev/null || manque+=(gh)
+  command -v node >/dev/null || manque+=(nodejs)
+  [ ${#manque[@]} -eq 0 ] || pkg install -y "${manque[@]}"
+  command -v yt-dlp >/dev/null || pip install -q -U "yt-dlp[default]"
+  rem="$(rclone listremotes 2>/dev/null | grep -m1 -x 'gdrive:' || rclone listremotes 2>/dev/null | head -1)"
+  rem="${rem%:}"
+  if [ -z "$rem" ]; then
+    echo "❌ Google Drive n'est pas relié à Termux (rclone). Tape « rclone config » (même compte Google que tes"
+    echo "   workflows), puis partage la vidéo à nouveau."
+    read -r -t 60 _ || true; return 1
+  fi
+  gh auth status >/dev/null 2>&1 || gh auth login
+  # langue de TON script (la vidéo, elle, peut être dans n'importe quelle langue)
+  langue=""
+  while [ -z "$langue" ]; do
+    echo "🌍 Langue de TON script ?  fr (Entrée) · ar · it · en"
+    read -r -t 60 rep || rep=""
+    rep="$(printf '%s' "$rep" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')"
+    case "$rep" in ""|fr) langue=fr ;; ar|it|en) langue="$rep" ;; *) echo "❓ Tape fr, ar, it ou en." ;; esac
+  done
+  echo
+  echo "⏱  Durée de ton commentaire en minutes ? (Entrée = 15)"
+  read -r -t 60 duree || duree=""
+  duree="$(printf '%s' "$duree" | tr -cd '0-9')"; [ -n "$duree" ] || duree=15
+  # téléchargement depuis le téléphone (720p max : assez pour la moitié de l'écran, envoi rapide)
+  rm -rf "$W" && mkdir -p "$W"
+  echo
+  echo "📥 Téléchargement de la vidéo…"
+  if ! yt-dlp --js-runtimes node --no-playlist --restrict-filenames --retries 10 \
+       -f "bv*[height<=720]+ba/b[height<=720]/bv*+ba/b" --merge-output-format mp4 \
+       -o "$W/%(title).60B-%(id)s.%(ext)s" "$url"; then
+    echo "❌ Téléchargement impossible (lien privé, supprimé, ou non pris en charge)."
+    read -r -t 60 _ || true; return 1
+  fi
+  nom="$(basename "$(find "$W" -type f -name '*.mp4' | head -n1)")"
+  [ -n "$nom" ] || { echo "❌ Aucune vidéo téléchargée."; read -r -t 60 _ || true; return 1; }
+  case "$(printf '%s' "$nom" | tr '[:upper:]' '[:lower:]')" in moi*) mv "$W/$nom" "$W/video-$nom"; nom="video-$nom" ;; esac
+  echo "☁️  Dépôt dans ton Drive « $JOINTS » : $nom ($(du -h "$W/$nom" | cut -f1))"
+  for i in 1 2 3; do
+    rclone copyto "$W/$nom" "$rem:$JOINTS/$nom" --retries 3 -q && break
+    echo "⚠️  Envoi interrompu (essai $i/3), nouvel essai…"; sleep 10
+  done
+  rclone lsf "$rem:$JOINTS/$nom" >/dev/null 2>&1 && [ -n "$(rclone lsf "$rem:$JOINTS/$nom" 2>/dev/null)" ] \
+    || { echo "❌ La vidéo n'a pas pu être déposée dans Drive (connexion ?). Partage-la à nouveau."; read -r -t 60 _ || true; return 1; }
+  rm -rf "$W"
+  # le prompteur en mode commentaire, sur CETTE vidéo (jamais une autre du dossier)
+  echo "🚀 Lancement du prompteur (mode commentaire, script en $langue, ≈ $duree min)…"
+  avant="$(gh run list -R "$OSINT" -w generate.yml -L 1 --json databaseId -q '.[0].databaseId' 2>/dev/null)"
+  for i in 1 2 3; do
+    if gh workflow run generate.yml -R "$OSINT" -f mode="commentaire d'une vidéo" -f video_commentee="$nom" \
+         -f langue="$langue" -f duree="$duree"; then
+      id=""
+      for _ in $(seq 1 12); do
+        sleep 5
+        id="$(gh run list -R "$OSINT" -w generate.yml -L 1 --json databaseId -q '.[0].databaseId' 2>/dev/null)"
+        [ -n "$id" ] && [ "$id" != "$avant" ] && break
+      done
+      if [ -n "$id" ] && [ "$id" != "$avant" ]; then
+        echo
+        echo "✅ C'est lancé : https://github.com/$OSINT/actions/runs/$id"
+        echo "   Dans ≈ 5 à 10 min : ton script dans OSINT-teleprompter-, dossier prompter/ (…_commentaire-…)."
+        echo "   La vidéo reste dans « $JOINTS » pour le fond vert et le Montage (mode commentaire d'une vidéo)."
+        read -r -t 60 _ || true; return 0
+      fi
+    fi
+    echo "⚠️  Lancement non confirmé (essai $i/3), nouvel essai dans 15 s…"; sleep 15
+  done
+  echo "❌ GitHub n'a pas démarré le prompteur. La vidéo est bien dans « $JOINTS » : lance « Générer le script »"
+  echo "   à la main (mode = commentaire d'une vidéo, video_commentee = $nom)."
+  read -r -t 120 _ || true; return 1
+}
+
+if [ ! -s "$FILE" ] && [ ${#trouves[@]} -eq 1 ]; then
+  clear 2>/dev/null || true
+  echo "🔗 ${trouves[0]}"
+  echo
+  echo "  Entrée       = 📝 TRANSCRIPTION (comme d'habitude)"
+  echo "  c  + Entrée  = 🎙  VIDÉO À COMMENTER (prompteur + montage « commentaire d'une vidéo »)"
+  echo
+  read -r -t 30 quoi || quoi=""
+  case "$(printf '%s' "$quoi" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')" in
+    c|commentaire|commenter) commenter "${trouves[0]}"; exit $? ;;
+    a|x) PRECHOIX="$quoi" ;;      # « a » / « x » tapé tout de suite : transcription, et ce choix est gardé
+  esac
+fi
+
 touch "$FILE"
 for lien in "${trouves[@]}"; do
   grep -qxF -- "$lien" "$FILE" || echo "$lien" >> "$FILE"   # pas de doublon
@@ -47,7 +147,7 @@ echo "  Entrée       = J'AI FINI : lancer ces $nb vidéo(s) ensemble"
 echo "  a  + Entrée  = attendre : partage la vidéo suivante"
 echo "  x  + Entrée  = vider la liste et ne rien lancer"
 echo
-read -r -t 20 choix || choix=""
+if [ -n "${PRECHOIX:-}" ]; then choix="$PRECHOIX"; else read -r -t 20 choix || choix=""; fi
 choix="$(printf '%s' "$choix" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')"
 langue="auto"
 case "$choix" in
