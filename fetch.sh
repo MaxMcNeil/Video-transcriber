@@ -30,10 +30,23 @@ liste_release() {
     # id<TAB>nom<TAB>date, ordre de dépôt (du plus ancien au plus récent) ; « _… » = fichiers internes
     ASSETS_TSV="$(gh api "repos/$REPO/releases/tags/videos" \
       -q '.assets | map(select(.name | startswith("_videos_deja") | not)) | sort_by(.created_at) | .[]
-          | "\(.id)\t\(.name)\t\(.created_at)"')"
+          | "\(.id)\t\(.name)\t\(.created_at)\t\(.label // "")"')"
     LISTE_RELEASE="$(printf '%s\n' "$ASSETS_TSV" | cut -f2 | sed '/^$/d')"
   fi
   [ -n "$LISTE_RELEASE" ]
+}
+
+# Lien d'origine d'un fichier de la Release : son étiquette (posée par le partage Termux),
+# sinon l'identifiant YouTube présent dans le nom (yt-…-ID.m4a / _-ID.m4a), sinon rien.
+lien_de() {
+  local nom="$1" label id
+  label="$(printf '%s\n' "$ASSETS_TSV" | awk -F'\t' -v n="$nom" '$2 == n { print $4; exit }')"
+  if [[ "$label" == http* ]]; then printf '%s' "$label"; return; fi
+  id="$(printf '%s' "$nom" | sed -nE 's/^(yt-.*-|_-|.*-)([A-Za-z0-9_-]{11})\.(m4a|webm|mp3|mp4|opus|ogg|wav)$/\2/p')"
+  # audio téléchargé par le partage Termux (yt-…, _-…, ou ancien format Titre-ID.m4a)
+  if [ -n "$id" ] && [[ "$nom" == yt-* || "$nom" == _-* || "$nom" =~ \.(m4a|webm|opus)$ ]]; then
+    printf 'https://youtu.be/%s' "$id"
+  fi
 }
 
 # id GitHub d'un fichier de la Release (pour se souvenir de ce qui est déjà traité)
@@ -148,20 +161,22 @@ for it in "${items[@]}"; do
   echo "::group::Source $n : $it"
   ok=1
   id_attente=""
+  lien=""
+  [[ "$it" == http* ]] && lien="$it"
   if [[ "$it" == http* ]]; then
     par_lien "$it" "$d" || ok=0
   else
     if liste_release; then
       nom="$(trouver_nom "$it")"
       if [ -n "$nom" ]; then
-        if depuis_release "$nom" "$d"; then id_attente="$(id_de "$nom")"; else ok=0; fi
+        if depuis_release "$nom" "$d"; then id_attente="$(id_de "$nom")"; lien="$(lien_de "$nom")"; else ok=0; fi
       else warn "« $it » introuvable dans la Release 'videos'. Présents : $(printf '%s\n' "$LISTE_RELEASE" | paste -sd ',' | sed 's/,/, /g')"; ok=0; fi
     else ok=0; fi
   fi
   f="$(find "$d" -type f -size +0 | head -n1)"
   if [ "$ok" = 1 ] && [ -n "$f" ] && est_media "$f"; then
     titre="$(basename "${f%.*}" | tr '._' '  ' | sed 's/  */ /g')"
-    printf '%s\t%s\n' "$f" "$titre" >> in/sources.tsv
+    printf '%s\t%s\t%s\n' "$f" "$titre" "$lien" >> in/sources.tsv
     [ -n "$id_attente" ] && echo "$id_attente" >> in/ids_release.txt
     ls -lh "$f"
   else

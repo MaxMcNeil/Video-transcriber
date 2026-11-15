@@ -49,12 +49,13 @@ deja_en_ligne() {   # $1 = nom, $2 = taille locale
 
 # Envoi robuste : 3 essais ; une coupure après un envoi réussi
 # (« already exists ») n'est pas un échec si le fichier en ligne est complet.
-envoyer() {   # $1 = fichier, $2 = nom
-  local taille essai
+envoyer() {   # $1 = fichier, $2 = nom, $3 = lien d'origine (gardé comme étiquette, pour les sources du prompteur)
+  local taille essai cible="$1"
+  [ -n "${3:-}" ] && cible="$1#$3"
   taille="$(stat -c %s "$1")"
   for essai in 1 2 3; do
     if deja_en_ligne "$2" "$taille"; then echo "✅ Déjà en ligne : $2"; return 0; fi
-    gh release upload videos "$1" -R "$REPO" --clobber && return 0
+    gh release upload videos "$cible" -R "$REPO" --clobber && return 0
     sleep 10
     if deja_en_ligne "$2" "$taille"; then echo "✅ Envoi confirmé : $2"; return 0; fi
     echo "Nouvel essai d'envoi ($essai/3)…"
@@ -79,7 +80,8 @@ for URL in "$@"; do
   [ -n "$f" ] || { echo "⚠️  Aucun fichier pour ce lien."; continue; }
   nom="$(basename "$f")"
   echo "Envoi dans la Release 'videos' : $nom ($(du -h "$f" | cut -f1))"
-  if envoyer "$f" "$nom"; then
+  lien="$(printf '%s' "$URL" | sed -E 's/[?&]si=[^&]*//; s/[?&]feature=[^&]*//; s/#.*//')"
+  if envoyer "$f" "$nom" "$lien"; then
     noms+=("$nom")
   else
     echo "⚠️  Envoi impossible pour $nom (vérifie ta connexion)."

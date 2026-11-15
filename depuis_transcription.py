@@ -44,6 +44,9 @@ def main():
                        "langue": INVERSE.get(nom_langue, nom_langue), "paragraphes": []}
                 sources.append(cur)
                 continue
+            if ligne.startswith("Lien : ") and cur is not None:
+                cur["lien"] = ligne[len("Lien : "):].strip()
+                continue
             m = PARA.match(ligne)
             if m and cur is not None:
                 cur["paragraphes"].append([secondes(ligne.split("]")[0] + "]"), m.group(2).strip()])
@@ -63,7 +66,7 @@ def main():
         with open(chemin, "w", encoding="utf-8") as f:
             json.dump({"paragraphes": s["paragraphes"]}, f, ensure_ascii=False)
         mots = sum(len(t.split()) for _, t in s["paragraphes"])
-        meta["sources"].append({"n": s["n"], "titre": s["titre"], "langue": s["langue"],
+        meta["sources"].append({"n": s["n"], "titre": s["titre"], "langue": s["langue"], "lien": s.get("lien", ""),
                                 "duree": s["paragraphes"][-1][0], "mots": mots, "fichier": chemin})
         print(f"Source {s['n']} : {s['titre']} ({s['langue']}, {mots} mots)")
     with open(os.path.join(a.work, "meta.json"), "w", encoding="utf-8") as f:

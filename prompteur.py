@@ -895,6 +895,11 @@ def main():
             variantes = [_norm(v) for v in citation[2] if len(_norm(v)) >= 12]
             paras = [p for p in texte.strip().split("\n\n") if not any(v in _norm(p) for v in variantes)]
             texte = f"« {citation[0]} »\n— {citation[1]}\n\n" + "\n\n".join(paras) + "\n"
+        liens = [(s_["titre"], s_.get("lien", "")) for s_ in meta["sources"] if s_.get("lien")]
+        if liens:                                      # sources à la fin du fichier (après le texte à lire)
+            entete = {"fr": "SOURCES", "ar": "المصادر", "it": "FONTI", "en": "SOURCES"}.get(langue, "SOURCES")
+            texte = texte.rstrip() + "\n\n————————————\n" + entete + " :\n" + \
+                "\n".join(f"- {t} : {l}" for t, l in liens) + "\n"
         with open(sortie, "w", encoding="utf-8") as f:
             f.write(texte)
         n = compter_mots(texte)

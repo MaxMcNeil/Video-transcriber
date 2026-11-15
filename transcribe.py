@@ -171,8 +171,10 @@ def lire_sources(chemin):
     with open(chemin, encoding="utf-8") as f:
         for ligne in f:
             if "\t" in ligne:
-                p, titre = ligne.rstrip("\n").split("\t", 1)
-                sources.append({"path": p, "titre": titre.strip() or "source"})
+                champs = ligne.rstrip("\n").split("\t")
+                p, titre = champs[0], champs[1]
+                lien = champs[2].strip() if len(champs) > 2 else ""
+                sources.append({"path": p, "titre": titre.strip() or "source", "lien": lien})
     return sources
 
 
@@ -198,7 +200,7 @@ def etape_plan(a):
     for n, s in enumerate(sources, 1):
         duree = duree_fichier(s["path"])
         coupes = points_de_coupe(s["path"], duree)
-        plan["sources"].append({"n": n, "titre": s["titre"], "duree": duree})
+        plan["sources"].append({"n": n, "titre": s["titre"], "duree": duree, "lien": s.get("lien", "")})
         for d, f in zip(coupes, coupes[1:]):
             k = len(plan["segments"])
             fichier = os.path.join("segments", f"seg_{k:03d}.flac")
@@ -321,6 +323,8 @@ def etape_assembler(a):
             paras = paragraphes(segs)
             txt.write(f"\n\n════════ SOURCE {i}/{len(plan['sources'])} : {src['titre']} "
                       f"({NOMS.get(langue, langue)}, {duree_txt(src['duree'])}) ════════\n")
+            if src.get("lien"):
+                txt.write(f"Lien : {src['lien']}\n")
             lignes = [(d_, t) for d_, t in paras] + [(d_, f"[… passage {hhmm(d_)}–{hhmm(f_)} non transcrit …]")
                                                      for d_, f_ in trous]
             for d_, t in sorted(lignes, key=lambda x: x[0]):
@@ -330,6 +334,7 @@ def etape_assembler(a):
             with open(chemin_src, "w", encoding="utf-8") as f:
                 json.dump({"paragraphes": paras}, f, ensure_ascii=False)
             meta["sources"].append({"n": i, "titre": src["titre"], "langue": langue, "duree": src["duree"],
+                                    "lien": src.get("lien", ""),
                                     "mots": nb_mots, "fichier": chemin_src})
             log(f"Source {i} : {NOMS.get(langue, langue)}, {nb_mots} mots" + (f", {len(trous)} trou(s)" if trous else ""))
     if manquantes:
