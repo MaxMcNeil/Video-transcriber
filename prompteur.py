@@ -437,6 +437,27 @@ def compter_mots(t):
     return len(t.split())
 
 
+def defauts(texte, langue, mots, chaine=""):
+    """Contrôle avant publication : ce qui rend un texte prompteur inutilisable (liste vide = bon)."""
+    pb = []
+    if langue == "ar":     # arabe : jamais de mots en lettres latines (« Saud », « Abdullah »), sauf le nom de la chaîne
+        permis = {m.lower() for m in re.findall(r"[A-Za-z]+", chaine or "")}
+        lat = [m for m in re.findall(r"[A-Za-z]{2,}", texte) if m.lower() not in permis]
+        if len(lat) > 2:
+            pb.append(f"{len(lat)} mot(s) en lettres latines ({', '.join(sorted(set(lat))[:5])})")
+    paras = [_norm(p) for p in texte.split("\n\n") if len(_norm(p)) >= 8]
+    if len(paras) - len(set(paras)) >= 2:
+        pb.append(f"{len(paras) - len(set(paras))} paragraphe(s) répété(s)")
+    # (« والليث في حرب » = « الليث في حرب » : la conjonction collée en tête ne fait pas une phrase différente)
+    phr = [re.sub(r"^(و|ف)(?=ال)", "", _norm(x)) for x in re.split(r"(?<=[.!?…؟])\s+", texte) if len(_norm(x)) >= 4]
+    boucle = sorted({x for x in phr if phr.count(x) >= 3})
+    if boucle:
+        pb.append(f"{len(boucle)} phrase(s) répétée(s) en boucle")
+    if compter_mots(texte) < mots * 0.35:
+        pb.append(f"trop court ({compter_mots(texte)} mots pour ~{mots})")
+    return pb
+
+
 # ───────────────────────── Pipeline ─────────────────────────
 
 def decouper(texte, max_tok, langue):
@@ -928,7 +949,14 @@ def main():
             log("IA en ligne : aucune clé utilisable, IA locale seule.")
     manquantes = [g for g, *_ in lister_morceaux(meta) if not os.path.exists(chemin_fiche(a.work, g))]
     conf_api = {"extraction": {"temperature": 0.2, "top_p": 0.9}, "ecriture": {"temperature": 0.8, "top_p": 0.95}}
-    for api in apis:
+    # 2 tours : une limite par minute ou une panne passagère se lève souvent en quelques minutes
+    tours = [(0, api) for api in apis] + [(1, api) for api in apis]
+    for tour, api in tours:
+        if tour and api is apis[0]:
+            if reste_min() < 40:
+                break
+            log("IA en ligne : nouvel essai de chacune dans 2 min (limite passagère ?)")
+            time.sleep(120)
         if manquantes and api.contexte < 20000:
             log(f"{api.nom} : fiches incomplètes et contexte trop petit, ignoré.")
             continue
@@ -949,12 +977,13 @@ def main():
                     completer(api, conf_api, texte, fiche, langue, mots)
             texte = polir(api, conf_api, texte, langue)
             n = compter_mots(texte)
-            if n >= mots * 0.35:
+            pb = defauts(texte, langue, mots, chaine)
+            if not pb:
                 publier(texte, api.nom)
                 return
-            if n > compter_mots(meilleur[0]):
+            if all(x.startswith("trop court") for x in pb) and n > compter_mots(meilleur[0]):
                 meilleur = (texte, api.nom)
-            avertir(f"{api.nom} : texte trop court ({n} mots pour ~{mots}).")
+            avertir(f"{api.nom} : texte refusé au contrôle ({' ; '.join(pb)}).")
         except Exception as e:
             dernier_err = e
             avertir(f"IA en ligne {api.nom} : {str(e)[:200]} — on passe à la suite.")
@@ -964,6 +993,18 @@ def main():
         citation = None
 
     # ── 2) IA locale (llama.cpp) ──
+    # Langues qu'elle écrit mal (arabe…) : elle ne prépare que la version anglaise ; aucun faux texte arabe publié
+    def sans_texte_local(texte_en, nom_ia):
+        nom = LANGUE[langue].split(" (")[0]
+        if texte_en.strip():
+            version = os.path.join(a.out, f"{meta['prefixe']}_prompteur.{travail}.txt")
+            with open(version, "w", encoding="utf-8") as f:
+                f.write(texte_en)
+        print(f"::error title=Prompteur {nom} non écrit::Gemini et Groq indisponibles (quota du jour ou panne) : "
+              f"l'IA locale ({nom_ia}) écrit trop mal en {nom} pour un texte fiable. La fiche"
+              + (" et la version anglaise sont" if texte_en.strip() else " est") + " dans la Release « transcriptions ». "
+              "Relance « Refaire le prompteur (sans retranscrire) » plus tard (quotas renouvelés chaque jour).")
+        sys.exit(1)
     for nom_ia in ordre[:2]:
         conf = config["ia"][nom_ia]
         srv = None
@@ -989,12 +1030,18 @@ def main():
                     texte = developper(srv, conf, texte, fiche, travail, mots) if mots <= 3000 else \
                         completer(srv, conf, texte, fiche, travail, mots)
                 n = compter_mots(texte)
-                if n > compter_mots(meilleur[0]):
+                pb = defauts(texte, travail, mots, chaine)
+                if all(x.startswith("trop court") for x in pb) and n > compter_mots(meilleur[0]):
                     meilleur = (texte, nom_ia)
-                if n >= mots * 0.35:
-                    publier(polir(srv, conf, vers_langue(srv, conf, texte), langue), nom_ia)
-                    return
-                avertir(f"Texte trop court ({n} mots pour ~{mots}).")
+                if not pb:
+                    if travail != langue:
+                        sans_texte_local(texte, nom_ia)
+                    final = polir(srv, conf, vers_langue(srv, conf, texte), langue)
+                    pb = defauts(final, langue, mots, chaine)
+                    if not pb:
+                        publier(final, nom_ia)
+                        return
+                avertir(f"{nom_ia} : texte refusé au contrôle ({' ; '.join(pb)}).")
             dernier_err = RuntimeError(f"{nom_ia} n'a pas produit de texte satisfaisant")
         except Exception as e:
             dernier_err = e
@@ -1009,6 +1056,8 @@ def main():
             log("Bascule sur l'autre IA locale.")
     if meilleur[0].strip():
         texte = meilleur[0]
+        if travail != langue and meilleur[1] in config["ia"]:   # texte local en arabe… : jamais publié
+            sans_texte_local(texte, meilleur[1])
         if travail != langue and meilleur[1] in config["ia"]:   # texte local : le traduire aussi
             conf = config["ia"][meilleur[1]]
             srv = None
