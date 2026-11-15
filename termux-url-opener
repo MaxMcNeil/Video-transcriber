@@ -16,9 +16,21 @@ if [ -z "${YT2R_MAJ:-}" ] && curl -fsSL -o ~/bin/termux-url-opener.new "$RAW/ter
   rm -f ~/bin/termux-url-opener.new
 fi
 
-lien="$1"
+# TikTok, X, Instagram… partagent parfois une phrase avec le lien (« Regarde cette vidéo de @… https://vm.tiktok.com/… ») :
+# on garde seulement le(s) lien(s) qu'elle contient (ponctuation finale retirée), jamais le texte autour
+mapfile -t trouves < <(printf '%s\n' "$*" | grep -oE 'https?://[^[:space:]<>"]+' | sed -E 's/[).,;:!?»”"]+$//')
+if [ ${#trouves[@]} -eq 0 ]; then
+  clear 2>/dev/null || true
+  echo "❓ Aucun lien dans ce qui a été partagé :"
+  echo "   $*"
+  echo "   (rien n'a été ajouté à la liste)"
+  read -r -t 15 _ || true
+  exit 0
+fi
 touch "$FILE"
-grep -qxF -- "$lien" "$FILE" || echo "$lien" >> "$FILE"   # pas de doublon
+for lien in "${trouves[@]}"; do
+  grep -qxF -- "$lien" "$FILE" || echo "$lien" >> "$FILE"   # pas de doublon
+done
 
 clear 2>/dev/null || true
 nb=$(grep -c . "$FILE")
