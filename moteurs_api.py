@@ -31,6 +31,25 @@ def _requete(url, corps=None, entetes=None, timeout=600):
         raise RuntimeError(f"HTTP {e.code} : {detail}") from None
 
 
+def _nature(e):
+    """Nature d'une erreur, pour ne JAMAIS condamner une clé ou un modèle sur un incident passager :
+    passager (surcharge 5xx, délai, réseau, limite par minute) → on patiente et on réessaie le même modèle ;
+    jour (quota du jour) / modele (modèle introuvable, requête refusée par CE modèle) → modèle suivant ;
+    acces (401/403) → on VÉRIFIE la clé avant de conclure."""
+    t = str(e)
+    m = re.match(r"HTTP (\d{3})", t)
+    if not m:                                   # réponse vide : CE modèle n'y arrive pas → modèle suivant
+        return "modele" if "réponse vide" in t else "passager"     # délai dépassé, réseau coupé…
+    code, low = int(m.group(1)), t.lower()
+    if code >= 500:
+        return "passager"
+    if code == 429:
+        return "jour" if re.search(r"per ?day|daily|perday|tpd|rpd", low) else "passager"
+    if code in (401, 403):
+        return "acces"
+    return "modele"
+
+
 def _version(nom):
     nums = re.findall(r"\d+(?:\.\d+)?", nom)
     return float(nums[0]) if nums else 0.0
@@ -94,9 +113,33 @@ class Gemini:
                 return texte.strip(), ("length" if fin == "MAX_TOKENS" else "stop")
             except Exception as e:
                 derniere = e
-                _log(f"   Gemini {modele} indisponible ({str(e)[:160]}) : modèle suivant.")
-                self.modeles.remove(modele)              # épuisé ou en panne : on ne le réessaie plus
+                n = _nature(e)
+                if n == "acces" and not self.cle_valide():
+                    raise RuntimeError(f"clé Gemini refusée par Google (vérifiée) : {str(e)[:160]}") from None
+                if n == "passager":                   # surcharge ou réseau : ni la clé ni le modèle ne sont en cause
+                    _log(f"   Gemini {modele} momentanément indisponible ({str(e)[:120]}) : modèle suivant, gardé pour plus tard.")
+                    continue
+                _log(f"   Gemini {modele} indisponible ({str(e)[:160]}) : modèle écarté.")
+                self.modeles.remove(modele)              # quota du jour, modèle retiré ou refusé à cette clé
+        if derniere is not None and _nature(derniere) == "passager" and self.modeles and not getattr(self, "_repli", False):
+            self._repli = True                           # tout est surchargé : une pause, puis un dernier tour
+            try:
+                _log("   Gemini : tous les modèles surchargés, pause de 60 s puis nouvel essai.")
+                time.sleep(60)
+                return self.chat(systeme, messages, max_tokens, params)
+            finally:
+                self._repli = False
         raise RuntimeError(f"Gemini épuisé : {derniere}")
+
+    def cle_valide(self):
+        """La clé elle-même est-elle bonne ? (un 403 peut viser UN modèle seulement). Doute → oui."""
+        try:
+            _requete(f"{self.BASE}/models?pageSize=1", entetes={"x-goog-api-key": self.cle}, timeout=30)
+            return True
+        except RuntimeError as e:
+            return not re.match(r"HTTP (400|401|403)", str(e))
+        except Exception:
+            return True
 
 
 class Groq:
@@ -138,14 +181,29 @@ class Groq:
                     return texte, ch.get("finish_reason")
                 except Exception as e:
                     derniere = e
-                    if "429" in str(e) and essai < 2:      # limite par minute : on patiente
-                        _log("   Groq : limite par minute atteinte, pause de 60 s.")
+                    n = _nature(e)
+                    if n == "acces" and not self.cle_valide():
+                        raise RuntimeError(f"clé Groq refusée (vérifiée) : {str(e)[:160]}") from None
+                    if n == "passager" and essai < 2:      # limite par minute, surcharge, réseau : on patiente
+                        _log(f"   Groq : {'limite par minute atteinte' if '429' in str(e) else 'incident passager'}, pause de 60 s.")
                         time.sleep(60)
                         continue
                     break
-            _log(f"   Groq {modele} indisponible ({str(derniere)[:160]}) : modèle suivant.")
+            if _nature(derniere) == "passager":
+                _log(f"   Groq {modele} momentanément indisponible ({str(derniere)[:160]}) : modèle suivant, gardé pour plus tard.")
+                continue
+            _log(f"   Groq {modele} indisponible ({str(derniere)[:160]}) : modèle écarté.")
             self.modeles.remove(modele)
         raise RuntimeError(f"Groq épuisé : {derniere}")
+
+    def cle_valide(self):
+        try:
+            _requete(f"{self.BASE}/models", entetes={"Authorization": f"Bearer {self.cle}"}, timeout=30)
+            return True
+        except RuntimeError as e:
+            return not re.match(r"HTTP (400|401|403)", str(e))
+        except Exception:
+            return True
 
 
 def moteurs_disponibles():
