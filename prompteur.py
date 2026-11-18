@@ -306,6 +306,7 @@ def prompt_ecriture(fiche, nb_sources, langue, mots, chaine, citation=None):
 
 QUI PARLE
 - C'est moi, l'animateur{chaine_txt}, qui parle à la première personne, en direct, à mon public.{vous}
+- HORS DU CONTEXTE : je ne m'inclus JAMAIS dans un pays, un peuple ou un camp. Jamais « nous », « notre », « nos », ni « on » au sens de « nous les Français » (idem dans la langue du texte : « we/our », « noi/nostro », « نحن/بلادنا »…). J'écris « la France », « les Français », « le gouvernement français », « l'Europe »… ; le public, c'est « vous » ; moi, « je ». Refusé : « notre dette nous étrangle ». Attendu : « la dette de la France étrangle les Français ». Même quand un invité disait « nous », je le reformule ainsi.
 - Tout ce qui vient d'un invité, d'un interviewé, d'un journaliste ou d'un autre commentateur devient MON analyse, racontée naturellement. Ne mentionne jamais d'interview, d'invité, de vidéo, de source, d'article, d'extrait, de fiche ni de chaîne d'origine.
 - Les déclarations des personnalités qui FONT l'actualité restent les leurs (« Untel a osé dire que… ») et je réagis dessus.
 {"- Une seule histoire cohérente du début à la fin, regroupée par idées, avec des transitions naturelles." if nb_sources > 1 else ""}
@@ -315,7 +316,7 @@ STRUCTURE D'UN LIVE YOUTUBE (rétention maximale ; les spectateurs arrivent en c
 1. COLD OPEN, 30 secondes : HOOK ULTRA-CHOC de 2 à 4 phrases construit sur l'ANGLE, le fait le plus alarmant ou scandaleux, une conséquence directe pour le public. Indignation et inquiétude immédiates. Termine par un TEASER de la bombe finale (la révélation la plus grave) sans la dévoiler : « Et ce que je vais vous révéler à la fin est encore pire. » Jamais de « bonjour » avant le hook.
 2. Salutation très courte, puis la PROMESSE : « Ce soir, X révélations. La dernière va vous glacer le sang. » Et tout de suite : « Partagez ce live maintenant à ceux qui doivent l'entendre. »
 3. UN SEGMENT PAR RÉVÉLATION, dans cet ordre « démarrer fort, finir encore plus fort » : D'ABORD la 2e révélation la plus explosive (pour accrocher tout de suite), PUIS les autres en montée d'intensité, et la BOMBE (la plus grave) seulement À LA FIN. Aucun segment faible au début. Chaque segment : mini-hook d'ouverture, les faits, le DÉCRYPTAGE STRATÉGIQUE (qui gagne, qui perd, ce que chaque acteur cherche vraiment, le rapport de force caché), une punchline d'humour noir, puis UNE question précise au chat (« Dites-moi dans le chat : … »). Une relance toutes les 4 à 6 phrases.
-4. Environ toutes les 8 minutes de lecture (≈ 1 200 mots), un RÉCAP de 2 phrases pour ceux qui arrivent (« Pour ceux qui nous rejoignent : … ») suivi d'un rappel like/partage, sans casser le rythme. Au milieu exact du texte, l'appel au like doit être drôle et percutant.
+4. Environ toutes les 8 minutes de lecture (≈ 1 200 mots), un RÉCAP de 2 phrases pour ceux qui arrivent (« Pour ceux qui arrivent : … ») suivi d'un rappel like/partage, sans casser le rythme. Au milieu exact du texte, l'appel au like doit être drôle et percutant.
 5. Avant la chute : LE SCÉNARIO DE LA SUITE, présenté clairement comme mon analyse (« mon pari », « le scénario le plus probable », « si rien ne change ») et jamais comme un fait, suivi d'un SONDAGE ORAL : « Tapez 1 dans le chat si…, tapez 2 si… ».
 6. La CHUTE : la bombe promise depuis le début (la révélation la plus grave), une punchline finale, un appel à s'abonner{chaine_cta} avec la cloche, l'annonce du prochain live SANS JAMAIS donner de jour, de date ni d'heure (« rendez-vous au prochain live, activez la cloche pour ne pas le rater »), puis UNE question finale pour les commentaires. Rien après.
 - Ne garde que le contenu FORT : ce qui choque, indigne, inquiète ou fait rire jaune. Écarte les détails secondaires ou techniques qui feraient décrocher.
@@ -800,8 +801,57 @@ TEXTE :
     return texte
 
 
+NOUS = {"fr": r"\b(nous|notre|nos)\b", "it": r"\b(noi|nostro|nostra|nostri|nostre)\b",
+        "en": r"\b(we|our|ours|ourselves)\b", "es": r"\b(nosotros|nosotras|nuestro|nuestra|nuestros|nuestras)\b",
+        "de": r"\b(wir|unser|unsere|unserer|unseren|unserem|unseres)\b"}
+GUILL = re.compile(r"«[^»]*»|“[^”]*”|\"[^\"]*\"")
+
+
+def nb_nous(texte, langue):
+    p = NOUS.get(langue)
+    return len(re.findall(p, GUILL.sub(" ", texte), re.I)) if p else 0
+
+
+def hors_contexte(srv, conf, texte, langue):
+    """Jamais « nous / notre / nos » : l'IA réécrit SEULEMENT les phrases fautives (hors citations), une par une ;
+    une réécriture qui garde un « nous » ou change trop la longueur est refusée → phrase d'origine gardée."""
+    if not nb_nous(texte, langue):
+        return texte
+    msg = f"""Voici un texte de prompteur en {LANGUE[langue]}. L'animateur doit se tenir HORS DU CONTEXTE : il ne s'inclut
+jamais dans un pays, un peuple ou un camp. Repère CHAQUE phrase qui contient « nous », « notre », « nos » (ou leur
+équivalent en {LANGUE[langue]} : we/our, noi/nostro…) hors citation entre guillemets, et réécris-la en disant « la France »,
+« les Français », le pays ou le groupe concerné, « vous » pour le public, « je » pour l'animateur — même sens, même ton,
+même longueur. Une ligne par phrase, exactement au format :
+AVANT: <la phrase copiée mot pour mot> || APRÈS: <la phrase réécrite>
+S'il n'y en a aucune, réponds : AUCUNE
+
+TEXTE :
+{texte}"""
+    try:
+        r, _ = srv.chat(SYS_EXTRACTION, [{"role": "user", "content": msg}], 2500, conf["extraction"])
+    except Exception as e:
+        avertir(f"Contrôle « nous » impossible ({e}) : {nb_nous(texte, langue)} « nous / notre / nos » restant(s).")
+        return texte
+    for ligne in r.splitlines():
+        m = re.match(r"\s*[-*]?\s*AVANT\s*:\s*(.+?)\s*\|\|\s*APR[ÈE]S\s*:\s*(.+?)\s*$", ligne)
+        if not m:
+            continue
+        avant, apres = m.group(1).strip().strip("«»\"“”"), m.group(2).strip().strip("«»\"“”")
+        if len(avant) < 4 or avant not in texte or nb_nous(apres, langue) >= nb_nous(avant, langue):
+            continue
+        if not 0.6 <= len(apres) / len(avant) <= 2.2:      # « nos » → « de la France » allonge ; jamais une réécriture déguisée
+            continue
+        texte = texte.replace(avant, apres, 1)
+    reste = nb_nous(texte, langue)
+    log(f"Hors du contexte : {reste} « nous / notre / nos » restant(s).")
+    if reste:
+        avertir(f"{reste} « nous / notre / nos » restant(s) dans le texte : relis ces phrases.")
+    return texte
+
+
 def polir(srv, conf, texte, langue):
-    return dedoublonner(sans_date_inventee(sans_debris(corriger_coquilles(srv, conf, texte, langue)), langue))
+    return hors_contexte(srv, conf, dedoublonner(sans_date_inventee(sans_debris(corriger_coquilles(srv, conf, texte, langue)), langue)),
+                         langue)
 
 
 def finaliser(srv, conf, texte, fiche):
