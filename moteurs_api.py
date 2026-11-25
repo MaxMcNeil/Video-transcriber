@@ -31,6 +31,38 @@ def _requete(url, corps=None, entetes=None, timeout=600):
         raise RuntimeError(f"HTTP {e.code} : {detail}") from None
 
 
+SUITE = ("Ta réponse précédente a été coupée par la limite de longueur. Écris UNIQUEMENT la suite, en reprenant exactement "
+         "au caractère où elle s'arrête : ne répète rien, n'ajoute ni introduction, ni explication, ni balise.")
+
+
+def _jonction(a, b):
+    """Recolle la suite sans doublon au point de jonction (le modèle répète parfois la fin)."""
+    b = re.sub(r"^\s*```\w*\s*", "", b or "")
+    for k in range(min(400, len(a), len(b)), 5, -1):
+        if a.endswith(b[:k]):
+            return a + b[k:]
+    return a + b
+
+
+def avec_suite(chat1, systeme, messages, max_tokens, params, maxi=4):
+    """RÉPONSE COUPÉE : on ne redemande JAMAIS tout ; on rend au modèle ce qu'il a écrit et on demande SEULEMENT LA SUITE."""
+    texte, fin = chat1(systeme, messages, max_tokens, params)
+    n = 0
+    while fin == "length" and texte and n < maxi:
+        n += 1
+        _log(f"   réponse coupée → demande de la suite seulement ({n}/{maxi})")
+        try:
+            suite, fin = chat1(systeme, list(messages) + [{"role": "assistant", "content": texte},
+                                                          {"role": "user", "content": SUITE}], max_tokens, params)
+        except Exception as e:
+            _log(f"   suite impossible ({str(e)[:120]}) : texte gardé tel quel")
+            break
+        if not suite:
+            break
+        texte = _jonction(texte, suite)
+    return texte, fin
+
+
 def _nature(e):
     """Nature d'une erreur, pour ne JAMAIS condamner une clé ou un modèle sur un incident passager :
     passager (surcharge 5xx, délai, réseau, limite par minute) → on patiente et on réessaie le même modèle ;
@@ -83,6 +115,9 @@ class Gemini:
         return trier(flash)[:3] + trier(lite)[:2]
 
     def chat(self, systeme, messages, max_tokens, params):
+        return avec_suite(self.chat1, systeme, messages, max_tokens, params)
+
+    def chat1(self, systeme, messages, max_tokens, params):
         contenus = [{"role": "model" if m["role"] == "assistant" else "user", "parts": [{"text": m["content"]}]}
                     for m in messages]
         corps = {
@@ -126,7 +161,7 @@ class Gemini:
             try:
                 _log("   Gemini : tous les modèles surchargés, pause de 60 s puis nouvel essai.")
                 time.sleep(60)
-                return self.chat(systeme, messages, max_tokens, params)
+                return self.chat1(systeme, messages, max_tokens, params)
             finally:
                 self._repli = False
         raise RuntimeError(f"Gemini épuisé : {derniere}")
@@ -153,47 +188,70 @@ class Groq:
         self.cle = cle
         r = _requete(f"{self.BASE}/models", entetes={"Authorization": f"Bearer {cle}"})
         dispo = [m["id"] for m in r.get("data", []) if m.get("active", True)]
-        self.modeles = [m for m in self.PREFERES if m in dispo] or [m for m in dispo if re.search(r"120b|70b|gpt-oss", m)][:2]
+        # préférés d'abord, puis les autres GRANDS modèles de texte (chaque modèle a SON quota : plus de modèles = plus de capacité)
+        texte_ok = [m for m in dispo if not re.search(r"whisper|tts|guard|orpheus|playai|vision|compound|embed|moderation", m, re.I)]
+        grands = [m for m in texte_ok if m not in self.PREFERES and (re.search(r"gpt-oss-120b|kimi|maverick", m)
+                  or int((re.search(r"(\d+)b\b", m) or [0, 0])[1]) >= 27)]
+        self.modeles = [m for m in self.PREFERES if m in dispo] + grands
         if not self.modeles:
             raise RuntimeError("aucun grand modèle Groq disponible")
         _log(f"Groq : modèles disponibles par ordre de préférence : {', '.join(self.modeles)}")
 
     def chat(self, systeme, messages, max_tokens, params):
+        return avec_suite(self.chat1, systeme, messages, max_tokens, params)
+
+    def chat1(self, systeme, messages, max_tokens, params):
+        """Modèle saturé (429) → AUSSITÔT un autre modèle Groq libre (chaque modèle a ses propres limites) ;
+        pause seulement si TOUS sont saturés. Modèle retiré ou refusé → écarté pour tout le run."""
         derniere = None
-        for modele in list(self.modeles):
+        pause = getattr(self, "_pause", None)
+        if pause is None:
+            pause = self._pause = {}
+        for _tour in range(8):
+            libres = [m for m in self.modeles if pause.get(m, 0) <= time.time()]
+            if not self.modeles:
+                break
+            if not libres:
+                attente = min(pause.get(m, 0) for m in self.modeles) - time.time()
+                if attente > 300:
+                    break
+                _log(f"   Groq : tous les modèles saturés, pause de {max(1, int(attente))} s.")
+                time.sleep(max(1, attente))
+                continue
+            modele = libres[0]
             corps = {"model": modele, "messages": [{"role": "system", "content": systeme}] + messages,
                      "temperature": params.get("temperature", 0.7), "top_p": params.get("top_p", 0.95),
                      "max_tokens": min(8000, max(2048, max_tokens * 2))}
             if "gpt-oss" in modele:
                 corps["reasoning_effort"] = "low"
-            for essai in range(3):
-                try:
-                    t0 = time.time()
-                    r = _requete(f"{self.BASE}/chat/completions", corps,
-                                 entetes={"Authorization": f"Bearer {self.cle}"})
-                    ch = r["choices"][0]
-                    texte = (ch["message"].get("content") or "").strip()
-                    if not texte:
-                        raise RuntimeError("réponse vide")
-                    u = r.get("usage", {})
-                    _log(f"   Groq {modele} : {u.get('prompt_tokens', '?')} → {u.get('completion_tokens', '?')} "
-                         f"tokens en {time.time() - t0:.0f} s")
-                    return texte, ch.get("finish_reason")
-                except Exception as e:
-                    derniere = e
-                    n = _nature(e)
-                    if n == "acces" and not self.cle_valide():
-                        raise RuntimeError(f"clé Groq refusée (vérifiée) : {str(e)[:160]}") from None
-                    if n == "passager" and essai < 2:      # limite par minute, surcharge, réseau : on patiente
-                        _log(f"   Groq : {'limite par minute atteinte' if '429' in str(e) else 'incident passager'}, pause de 60 s.")
-                        time.sleep(60)
-                        continue
-                    break
-            if _nature(derniere) == "passager":
-                _log(f"   Groq {modele} momentanément indisponible ({str(derniere)[:160]}) : modèle suivant, gardé pour plus tard.")
-                continue
-            _log(f"   Groq {modele} indisponible ({str(derniere)[:160]}) : modèle écarté.")
-            self.modeles.remove(modele)
+            try:
+                t0 = time.time()
+                r = _requete(f"{self.BASE}/chat/completions", corps, entetes={"Authorization": f"Bearer {self.cle}"})
+                ch = r["choices"][0]
+                texte = (ch["message"].get("content") or "").strip()
+                if not texte:
+                    raise RuntimeError("réponse vide")
+                u = r.get("usage", {})
+                _log(f"   Groq {modele} : {u.get('prompt_tokens', '?')} → {u.get('completion_tokens', '?')} "
+                     f"tokens en {time.time() - t0:.0f} s")
+                return texte, ch.get("finish_reason")
+            except Exception as e:
+                derniere = e
+                n = _nature(e)
+                if n == "acces" and not self.cle_valide():
+                    raise RuntimeError(f"clé Groq refusée (vérifiée) : {str(e)[:160]}") from None
+                if n == "passager":
+                    m_ = re.search(r"try again in (?:(\d+)m)?([\d.]+)s", str(e))
+                    attente = (int(m_.group(1) or 0) * 60 + float(m_.group(2)) + 2) if m_ else 60
+                    pause[modele] = time.time() + attente
+                    _log(f"   Groq {modele} saturé ({str(e)[:100]}) : autre modèle Groq tout de suite.")
+                    continue
+                if n == "jour":
+                    pause[modele] = time.time() + 6 * 3600
+                    _log(f"   Groq {modele} : quota du jour atteint → autre modèle Groq.")
+                    continue
+                _log(f"   Groq {modele} indisponible ({str(e)[:160]}) : modèle écarté pour ce run.")
+                self.modeles.remove(modele)
         raise RuntimeError(f"Groq épuisé : {derniere}")
 
     def cle_valide(self):
