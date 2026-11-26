@@ -30,6 +30,22 @@ fi
 # ---------------------------------------------------------------------------------------------------------------------
 # 1er lien partagé (liste vide) : on demande d'abord QUOI en faire — transcription (comme avant) ou vidéo à commenter
 # ---------------------------------------------------------------------------------------------------------------------
+parcours() {    # le chemin complet d'une vidéo commentée, affiché au début et à la fin
+  echo "🧭 LE PARCOURS (dans cet ordre) :"
+  echo "   1. La vidéo à commenter va dans GOOGLE DRIVE → dossier « montage-joints » (⚠ PAS dans Releases)"
+  echo "      → je m'en occupe maintenant, depuis ce partage."
+  echo "   2. Le prompteur (OSINT-teleprompter-, mode « commentaire d'une vidéo ») écrit ton script"
+  echo "      → je le lance juste après ; prêt en ≈ 5 à 10 min, dans le dossier prompter/ (…_commentaire-…)."
+  echo "   3. TOI : tu t'enregistres en lisant le script (fichier « moi… »). À chaque « 🎬 ÉCOUTEZ ÇA », dis-le"
+  echo "      bien : c'est le signal qui relance la vidéo commentée au montage."
+  echo "   4. Le montage, au choix :"
+  echo "      • fond vert → lance ton workflow fond vert habituel avec « 🔗 Chaîne — mode du Montage »"
+  echo "        = commentaire d'une vidéo (le Montage suit tout seul) ;"
+  echo "      • sans fond vert → dépose ta vidéo « moi… » et lance Montage LV final, « 🎙 Mode » = commentaire d'une vidéo."
+  echo "   ⚠ Ne supprime pas la vidéo de « montage-joints » avant la fin du montage. Pas de Shorts dans ce mode."
+  echo
+}
+
 commenter() {   # $1 = lien de la vidéo à commenter
   local url="$1" rem nom titre langue duree avant id i
   local OSINT="MaxMcNeil/OSINT-teleprompter-" JOINTS="montage-joints" W="$HOME/.commentaire"
@@ -37,6 +53,7 @@ commenter() {   # $1 = lien de la vidéo à commenter
   echo "🎙  VIDÉO À COMMENTER"
   echo "   $url"
   echo
+  parcours
   # outils (une seule fois)
   local manque=()
   command -v ffmpeg >/dev/null || manque+=(ffmpeg)
@@ -103,7 +120,11 @@ commenter() {   # $1 = lien de la vidéo à commenter
         echo "✅ C'est lancé : https://github.com/$OSINT/actions/runs/$id"
         echo "   Dans ≈ 5 à 10 min : ton script dans OSINT-teleprompter-, dossier prompter/ (…_commentaire-…)."
         echo "   La vidéo reste dans « $JOINTS » pour le fond vert et le Montage (mode commentaire d'une vidéo)."
-        read -r -t 60 _ || true; return 0
+        echo
+        echo "👉 Étapes 1 et 2 faites. À toi : étape 3 (enregistrement), puis étape 4 (montage) :"
+        echo
+        parcours
+        read -r -t 300 _ || true; return 0
       fi
     fi
     echo "⚠️  Lancement non confirmé (essai $i/3), nouvel essai dans 15 s…"; sleep 15
